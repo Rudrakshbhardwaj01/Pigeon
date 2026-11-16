@@ -233,7 +233,7 @@ Read the honest details: [`docs/SECURITY.md`](docs/SECURITY.md) and
 
 | Browser | GIF import | Camera receiving | Offline PWA |
 |---|---|---|---|
-| Chromium/Chrome (desktop & Android) | ✅ tested | ✅ init tested (fake stream); no real-device scan yet | ✅ tested |
+| Chromium/Chrome (desktop & Android) |  tested |  init tested (fake stream); no real-device scan yet |  tested |
 | Firefox | expected to work (standard APIs) | untested | untested |
 | Safari | expected to work (standard APIs) | untested | untested |
 
@@ -315,6 +315,5 @@ Dependency licenses: [`apps/web/THIRD_PARTY_LICENSES.md`](apps/web/THIRD_PARTY_L
 
 **Made by [Rudraksh Bhardwaj](https://rudrakshbhardwaj.vercel.app/)**
 
-⭐ [Star Pigeon on GitHub](https://github.com/Rudrakshbhardwaj01/Pigeon)
 
 </div>
