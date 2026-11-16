@@ -1,0 +1,36 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_gifbuilder_free: (a: number, b: number) => void;
+export const __wbg_gifframestream_free: (a: number, b: number) => void;
+export const __wbg_qrframesession_free: (a: number, b: number) => void;
+export const __wbg_receiver_free: (a: number, b: number) => void;
+export const encode_gif: (a: number, b: number, c: any) => [number, number, number];
+export const gifbuilder_finish: (a: number) => [number, number, number, number];
+export const gifbuilder_framesWritten: (a: number) => number;
+export const gifbuilder_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+export const gifbuilder_writeMatrix: (a: number, b: number, c: number, d: number) => [number, number];
+export const gifframestream_dimensions: (a: number) => [number, number];
+export const gifframestream_new: (a: number, b: number) => [number, number, number];
+export const gifframestream_nextFrame: (a: number) => [number, number, number];
+export const prepare_transfer: (a: number, b: number, c: any) => [number, number, number];
+export const protocol_version: () => number;
+export const qrframesession_nextFrame: (a: number) => [number, number, number];
+export const qrframesession_totalFrames: (a: number) => number;
+export const receiver_activeStatus: (a: number) => [number, number, number];
+export const receiver_allStatuses: (a: number) => [number, number, number];
+export const receiver_counters: (a: number) => [number, number, number];
+export const receiver_ingestPacket: (a: number, b: number, c: number) => [number, number, number];
+export const receiver_new: (a: number) => number;
+export const receiver_reset: (a: number) => void;
+export const receiver_statusOf: (a: number, b: number, c: number) => [number, number, number];
+export const receiver_takeFile: (a: number, b: number, c: number) => [number, number, number];
+export const sanitizeFilename: (a: number, b: number) => [number, number];
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_start: () => void;

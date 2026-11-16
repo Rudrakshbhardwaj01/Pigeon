@@ -1,0 +1,25 @@
+{
+  "name": "pigeon",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Offline-first optical file transfer: files become animated QR GIFs and are reconstructed exactly on another device.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @pigeon/web",
+    "build": "npm run build --workspace @pigeon/web",
+    "preview": "npm run preview --workspace @pigeon/web",
+    "build:wasm": "wasm-pack build crates/pigeon-wasm --target web --release --out-dir ../../apps/web/src/wasm/pigeon-wasm && node scripts/strip-wasm-gitignore.js",
+    "build:wasm:dev": "wasm-pack build crates/pigeon-wasm --target web --profiling --out-dir ../../apps/web/src/wasm/pigeon-wasm && node scripts/strip-wasm-gitignore.js",
+    "test:web": "npm run test --workspace @pigeon/web",
+    "test:e2e": "npm run test:e2e --workspace @pigeon/web",
+    "test:rust": "cargo test --workspace",
+    "typecheck": "npm run typecheck --workspace @pigeon/web",
+    "lint": "npm run lint --workspace @pigeon/web"
+  }
+}

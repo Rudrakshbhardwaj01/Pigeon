@@ -1,0 +1,21 @@
+[package]
+name = "pigeon-core"
+description = "Environment-neutral Pigeon optical file-transfer core: protocol, FEC, QR, GIF, reconstruction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+crc32c.workspace = true
+sha2.workspace = true
+flate2.workspace = true
+raptorq.workspace = true
+fast_qr.workspace = true
+gif.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+# QR decoding for native roundtrip tests (not used at runtime)
+rqrr = { version = "0.11", default-features = false, features = ["img"] }

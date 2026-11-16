@@ -1,0 +1,80 @@
+
+# ==========================================
+# Dependencies
+# ==========================================
+node_modules/
+**/node_modules/
+
+# ==========================================
+# Rust / WebAssembly build artifacts
+# ==========================================
+target/
+target_wasm/
+**/target/
+**/target_wasm/
+**/pkg/
+**/*.wasm.map
+
+# ==========================================
+# Frontend build artifacts
+# ==========================================
+apps/web/dist/
+apps/web/dev-dist/
+
+# ==========================================
+# Test artifacts
+# ==========================================
+apps/web/test-results/
+apps/web/tests/.tmp-download/
+apps/web/playwright-report/
+apps/web/blob-report/
+playwright/.cache/
+coverage/
+.nyc_output/
+
+# ==========================================
+# Temporary files and logs
+# ==========================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.old
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# Local environment and secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+.local/
+
+# ==========================================
+# Editor and IDE
+# ==========================================
+.vscode/
+.idea/
+*.sublime-workspace
+
+# ==========================================
+# TypeScript
+# ==========================================
+*.tsbuildinfo
+
+# ==========================================
+# Private / internal documentation
+# ==========================================
+docs/REFERENCE_RESEARCH.md
+docs/DECISIONS.md
+docs/IMPLEMENTATION_STATUS.md

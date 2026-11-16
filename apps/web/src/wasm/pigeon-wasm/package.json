@@ -1,0 +1,17 @@
+{
+  "name": "pigeon-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings for the Pigeon core",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "pigeon_wasm_bg.wasm",
+    "pigeon_wasm.js",
+    "pigeon_wasm.d.ts"
+  ],
+  "main": "pigeon_wasm.js",
+  "types": "pigeon_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
