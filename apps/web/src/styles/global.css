@@ -104,8 +104,20 @@ body {
 
 /* ---- hero ---- */
 
+/* Composition notes (measured against the artwork, 1672×941):
+   The painting is a ring of pigeons around a central sky. The top-centre
+   pigeon's beak ends at 27% of the image height and the bottom-centre
+   pigeon's head starts at 58%, so the clean central band is ≈ 0.28H–0.58H.
+   With `cover` the artwork fits the hero height exactly at every common
+   aspect ratio, so that band is 0.28–0.58 of the HERO height. Everything
+   below positions the content group inside that band. */
+
 .hero {
-  min-height: 100svh;
+  /* Definite height (not min-height): the content group is always far
+     shorter than the hero, and a definite height lets the percentage
+     `top` bias on .hero-inner resolve against the real artwork scale. */
+  height: 100vh;
+  height: 100svh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -127,34 +139,47 @@ body {
 
 .hero-inner {
   position: relative;
+  /* The sky band's centre sits at ~43% of the hero height (see composition
+     notes above), so shift the centred group up by 7.25% of the hero. A
+     percentage keeps the bias correct even when the media-query floor makes
+     the hero taller than the viewport. */
+  top: -7.25%;
   z-index: 1;
   text-align: center;
-  padding: 48px 20px;
-  max-width: 640px;
+  max-width: 760px;
+  padding: 16px 20px;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
 
 .hero-wordmark {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: clamp(52px, 9vw, 84px);
-  line-height: 1.05;
-  margin: 0 0 4px;
+  font-size: clamp(2.6rem, 6.8vh, 5rem);
+  font-size: clamp(2.6rem, 6.8svh, 5rem);
+  line-height: 1;
+  margin: 0;
   color: #fff;
   text-shadow: 0 3px 0 rgba(13, 62, 122, 0.55);
 }
 
 .hero-kicker {
-  font-size: clamp(12px, 2vw, 15px);
+  font-size: clamp(11px, 1.8vh, 15px);
+  font-size: clamp(11px, 1.8svh, 15px);
   letter-spacing: 0.42em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.92);
-  margin: 0 0 18px;
+  margin: 1.8vh 0 0;
+  margin: 1.8svh 0 0;
 }
 
 .hero-tag {
   color: rgba(255, 255, 255, 0.95);
-  font-size: 15px;
-  margin: 0 0 28px;
+  font-size: 13px;
+  line-height: 1.5;
+  text-wrap: balance;
+  margin: 1.2vh 0 0;
+  margin: 1.2svh 0 0;
 }
 
 .hero-actions {
@@ -162,12 +187,14 @@ body {
   gap: 14px;
   justify-content: center;
   flex-wrap: wrap;
+  margin: 1.5vh 0 0;
+  margin: 1.5svh 0 0;
 }
 
 .hero-btn {
   border-radius: 999px;
-  padding: 13px 26px;
-  font-size: 15px;
+  padding: 10px 22px;
+  font-size: 14px;
 }
 .hero-btn-outline {
   background: rgba(255, 255, 255, 0.12);
@@ -181,13 +208,14 @@ body {
 .hero-indicators {
   list-style: none;
   display: flex;
-  gap: 22px;
+  gap: 7px 22px;
   justify-content: center;
   flex-wrap: wrap;
   padding: 0;
-  margin: 30px 0 0;
+  margin: 1vh 0 0;
+  margin: 1svh 0 0;
   color: rgba(255, 255, 255, 0.92);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 .hero-indicators li {
   display: inline-flex;
@@ -198,14 +226,15 @@ body {
 .github-cta {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  margin-top: 22px;
-  padding: 9px 18px;
+  gap: 8px;
+  margin-top: 0.8vh;
+  margin-top: 0.8svh;
+  padding: 7px 16px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.14);
   border: 1.5px solid rgba(255, 255, 255, 0.55);
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   transition: background 120ms, border-color 120ms;
 }
@@ -215,6 +244,33 @@ body {
 }
 .github-cta svg:last-child {
   color: rgba(255, 255, 255, 0.9);
+}
+
+/* Portrait viewports (phones, portrait tablets): cover would leave the same
+   0.30H band, but the content stack is taller there. Zoom the artwork to 150%
+   of the hero height and centre it: the side pigeons are cropped by the
+   narrow viewport anyway, while the top pigeon's beak and the bottom
+   pigeon's face stay fully visible and frame a tall sky column (~0.45H)
+   for the content. */
+@media (max-aspect-ratio: 21/20) {
+  .hero {
+    background-size: auto 170%;
+    background-position: center;
+    height: max(100vh, 800px);
+    height: max(100svh, 800px);
+  }
+  .hero-inner {
+    top: -12%;
+  }
+}
+
+/* Short landscape windows (1280×800, 1024×768, 1440×900): the sky band is
+   0.30 × hero height, so give the hero a modest floor instead of letting the
+   content crowd the bottom pigeon. */
+@media (min-width: 900px) and (max-height: 940px) {
+  .hero {
+    height: 980px;
+  }
 }
 
 /* ---- body layout ---- */
@@ -406,6 +462,9 @@ a:focus-visible {
 
 .tabs {
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
   gap: 4px;
   background: rgba(255, 255, 255, 0.5);
   border: 1px solid var(--border);

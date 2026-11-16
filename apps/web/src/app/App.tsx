@@ -32,9 +32,8 @@ export function App() {
           <h1 className="hero-wordmark">Pigeon</h1>
           <p className="hero-kicker">Optical file transfer</p>
           <p className="hero-tag">
-            Send any file through animated QR codes.
-            <br />
-            No internet. No pairing. Just a GIF and a camera.
+            Send any file through animated QR codes. No server. No pairing.
+            Just a GIF and a camera.
           </p>
           <div className="hero-actions">
             <button className="btn primary hero-btn" onClick={() => scrollTo("send")}>

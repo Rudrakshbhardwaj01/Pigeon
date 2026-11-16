@@ -298,8 +298,7 @@ Pigeon's design was informed by studying three prior projects —
 [TXQR](https://github.com/divan/txqr) (the original animated-QR + fountain
 concept), [RaptorQR](https://github.com/infrost/RaptorQR) (protocol and
 performance reference) and [AirQR](https://github.com/Thunzyy/AirQR) (the
-closest product reference) — without copying code from any of them. Study
-notes: [`docs/REFERENCE_RESEARCH.md`](docs/REFERENCE_RESEARCH.md).
+closest product reference) — without copying code from any of them.
 Dependency licenses: [`apps/web/THIRD_PARTY_LICENSES.md`](apps/web/THIRD_PARTY_LICENSES.md).
 
 ## Roadmap
@@ -314,6 +313,4 @@ Dependency licenses: [`apps/web/THIRD_PARTY_LICENSES.md`](apps/web/THIRD_PARTY_L
 <div align="center">
 
 **Made by [Rudraksh Bhardwaj](https://rudrakshbhardwaj.vercel.app/)**
-
-
 </div>

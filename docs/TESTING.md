@@ -74,5 +74,4 @@ npm run test:e2e -- -g "incomplete Pigeon GIF"
 
 Camera tests use Playwright's Chromium fake media stream; they verify that
 the camera path initializes and decodes without a physical camera. **Real
-device camera scanning was not performed as part of this delivery** — see
-`docs/IMPLEMENTATION_STATUS.md` for what that means for camera receiving.
+device camera scanning was not performed as part of this delivery.**

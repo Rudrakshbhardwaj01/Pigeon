@@ -13,7 +13,7 @@ The pigeon references carrier pigeons: the message travels on its own,
 without infrastructure.
 
 **Status:** functional end-to-end (both receive paths); see
-`docs/IMPLEMENTATION_STATUS.md` for verified capabilities and known gaps.
+`docs/TESTING.md` for what the automated suites verify and cover.
 
 ## Scope and requirements
 
@@ -102,4 +102,4 @@ Key locations: `apps/web/src/` (UI), `crates/pigeon-core/src/` (engine),
   `docs/BENCHMARKS.md`); the UI surfaces the frame count before download.
 - Optical throughput at 4 fps is ~3 KiB/s with the default geometry.
 - Real-device camera scanning has not been exercised (Playwright fake media
-  stream only); see `IMPLEMENTATION_STATUS.md`.
+  stream only).
