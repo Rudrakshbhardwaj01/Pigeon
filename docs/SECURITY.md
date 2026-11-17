@@ -26,15 +26,56 @@ what the implementation actually does and does not guarantee.
 - Fountain coding tolerates missing frames; reconstruction failure is
   always explicit.
 
-### Confidentiality (NOT provided)
+### Confidentiality (mode-dependent)
 
-- **Pigeon does not encrypt.** Anyone who receives the GIF can decode the
-  file. The checksum authenticates *content*, not the *sender*: SHA-256 and
-  CRC32C are not signatures. If a GIF could be swapped in transit (e.g. an
-  attacker replaces it on a shared drive) they can substitute a different
-  valid transfer with its own consistent manifest.
-- The protocol reserves flag space for authenticated encryption
-  (e.g. XChaCha20-Poly1305) as a future additive change; none is implemented.
+**Unencrypted transfers (protocol v1) do not encrypt.** Anyone who receives
+the GIF can decode the file. The checksum authenticates *content*, not the
+*sender*: SHA-256 and CRC32C are not signatures. If a GIF could be swapped
+in transit (e.g. an attacker replaces it on a shared drive) they can
+substitute a different valid transfer with its own consistent manifest.
+Treat an unencrypted GIF as the secret itself.
+
+**Encrypted transfers (protocol v2, optional)** provide authenticated
+confidentiality with established primitives:
+
+- **KDF:** Argon2id, 32-byte key, OWASP-recommended defaults (m = 19 MiB,
+  t = 2, p = 1). The parameters and salt travel in the plaintext metadata
+  envelope so future encoders can raise costs; receivers validate them
+  against hard caps (memory ≤ 64 MiB, passes ≤ 16, lanes ≤ 8) before any
+  allocation, so a hostile sender cannot force an unbounded derivation.
+- **AEAD:** XChaCha20-Poly1305 with a fresh random 192-bit nonce per sealed
+  value (object layer and every packet layer).
+- **Transfer binding:** the AEAD associated data is the packet header bytes
+  `[2..16]` — version, flags, transfer id, length. Packets cannot be moved
+  between transfers or have their identity tampered with without failing
+  authentication; the reconstructed object is likewise bound to the transfer
+  id before decompression.
+- **Metadata protection:** filename, MIME type, size, checksum and FEC
+  parameters are inside the encrypted metadata envelope. Until the correct
+  passphrase is provided, the receiver cannot read any of them (the UI
+  shows an encrypted-transfer gate, not partial information).
+- **Ordering:** authentication happens before plaintext use at every layer —
+  packet tags before decoder state changes, the object tag before
+  decompression, the SHA-256 before the download is offered.
+- **Failure behaviour:** a wrong passphrase is rejected without destroying
+  receive state; the transfer pauses in `awaiting-passphrase` and can be
+  retried. Per-packet authentication failures are counted and surfaced.
+
+**What encryption does NOT provide (documented limits):**
+
+1. **Sender authentication.** A passphrase is shared knowledge; anyone with
+   it can create a valid encrypted transfer. Possession of the passphrase
+   authenticates nothing about the sender's identity.
+2. **Passphrase strength.** The construction is only as strong as the
+   passphrase; the KDF raises attack cost but cannot rescue "1234". The UI
+   states this honestly.
+3. **Metadata leakage.** Transfer id, salt, KDF parameters, packet volume
+   and timing remain visible — they are inherently outside the envelope.
+4. **Memory erasure guarantees.** Passphrases and keys are zeroized on drop
+   where the runtime allows, but the browser cannot guarantee that no
+   intermediate copy ever existed (see also the WASM linear-memory model).
+5. **Channel observation.** The optical channel is broadcast; a camera in
+   the room captures what a screen shows regardless of encryption.
 
 ### Input handling (hostile by default)
 
@@ -46,6 +87,9 @@ untrusted:
   looping.
 - Packets: exact-length checks, CRC32C, reserved-flag rejection, version
   rejection, payload ≤ 4096 bytes.
+- Envelopes (v2): cipher/KDF id whitelists, KDF parameter caps before
+  allocation, exact inner-length consistency, AEAD authentication before any
+  plaintext reaches decoder state.
 - Metadata: bounded filename (≤ 255 bytes) and MIME (≤ 127 bytes),
   compression-id whitelist, declared transfer size ≤ 512 MiB.
 - Decompression: zlib output capped at the declared original size (read
@@ -53,8 +97,8 @@ untrusted:
 - Filenames are sanitized again on receipt (path separators, control chars,
   Windows-illegal characters, leading dots, device names, char-boundary-safe
   length cap) — downloads cannot escape the chosen filename.
-- Unknown protocol versions and unknown flag bits are hard errors, never
-  silently salvaged.
+- Unknown protocol versions, unknown flag bits, unknown cipher/KDF ids and
+  out-of-range KDF parameters are hard errors, never silently salvaged.
 
 ### Resource exhaustion
 
@@ -79,15 +123,20 @@ decompression caps, encoder file cap. Decoding work is streamed
 
 ## What this does NOT protect against
 
-1. A malicious recipient or sender (no authentication, no encryption).
-2. Compromise of the browser itself (Pigeon runs with page privileges).
-3. Physical observation of the screen/camera channel by a third party.
-4. Denial of service via pathological inputs beyond the caps (the caps bound
+1. A malicious sender or recipient: encryption proves knowledge of the
+   passphrase, not a real-world identity. For sender binding, verify the
+   SHA-256 out-of-band (encrypted or not) or hand-deliver the passphrase
+   over a different channel than the GIF.
+2. Weak passphrases: the KDF raises the cost of guessing but cannot rescue
+   one. Length and uniqueness remain the user's responsibility.
+3. Compromise of the browser itself (Pigeon runs with page privileges).
+4. Physical observation of the screen/camera channel by a third party.
+5. Denial of service via pathological inputs beyond the caps (the caps bound
    it; a 256 MiB hostile GIF still costs CPU to walk).
-5. Tampering with the app bundle in transit — host Pigeon from a trusted
+6. Tampering with the app bundle in transit — host Pigeon from a trusted
    origin (HTTPS); the service worker pins the first-installed version.
 
 ## Reporting
 
-This is an open-source project without a paid security process; report
-issues on the project tracker with reproduction steps.
+See [`SECURITY.md`](../SECURITY.md) at the repository root for the
+vulnerability reporting process and scope.

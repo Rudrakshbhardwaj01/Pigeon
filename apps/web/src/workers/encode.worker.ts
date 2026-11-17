@@ -6,6 +6,7 @@ import {
   initEngine,
   prepareTransfer,
   newGifBuilder,
+  estimateTransfer,
 } from "../wasm/bridge";
 import type {
   EncodeParams,
@@ -19,11 +20,17 @@ export interface EncodeGifRequest {
   params: EncodeParams;
 }
 
+export interface EstimateRequest {
+  kind: "estimate";
+  size: number;
+  params: EncodeParams;
+}
+
 export interface CancelRequest {
   kind: "cancel";
 }
 
-export type EncodeRequest = EncodeGifRequest | CancelRequest;
+export type EncodeRequest = EncodeGifRequest | EstimateRequest | CancelRequest;
 
 export interface EncodeProgress {
   id: number;
@@ -59,6 +66,13 @@ async function handle(request: EncodeRequest, requestId: number): Promise<void> 
 
   if (request.kind === "cancel") {
     cancelled = true;
+    return;
+  }
+
+  if (request.kind === "estimate") {
+    // Cheap: QR-capacity probing only, no fountain or rendering work.
+    const estimate = estimateTransfer(request.size, request.params);
+    post({ id: requestId, kind: "ok", result: { estimate } });
     return;
   }
 

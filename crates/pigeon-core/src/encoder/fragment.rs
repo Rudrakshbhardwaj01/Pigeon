@@ -20,20 +20,20 @@ pub enum CompressionMode {
 
 /// Signatures of formats that are already compressed; re-compressing wastes CPU.
 const COMPRESSED_MAGIC: [&[u8]; 14] = [
-    b"PK\x03\x04",     // zip (and zip-based office formats)
-    b"\x1f\x8b",       // gzip
-    b"\x89PNG",        // png
-    b"7z\xbc\xaf",     // 7z
-    b"\xfd7zXZ",       // xz
+    b"PK\x03\x04",       // zip (and zip-based office formats)
+    b"\x1f\x8b",         // gzip
+    b"\x89PNG",          // png
+    b"7z\xbc\xaf",       // 7z
+    b"\xfd7zXZ",         // xz
     b"\x28\xb5\x2f\xfd", // zstd
-    b"OggS",           // ogg
-    b"fLaC",           // flac
-    b"Rar!",           // rar
-    b"BZh",            // bzip2
-    b"\x00\x00\x00",   // mp4 starts with a size box (ftyp follows); media is compressed
+    b"OggS",             // ogg
+    b"fLaC",             // flac
+    b"Rar!",             // rar
+    b"BZh",              // bzip2
+    b"\x00\x00\x00",     // mp4 starts with a size box (ftyp follows); media is compressed
     b"ftyp",
-    b"ID3",            // mp3 metadata
-    b"wOFF",           // woff fonts
+    b"ID3",  // mp3 metadata
+    b"wOFF", // woff fonts
 ];
 
 /// Heuristic: does this start with a signature of an already-compressed format?
@@ -67,7 +67,10 @@ pub fn prepare_payload(
     }
 
     use std::io::Write;
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len()), flate2::Compression::fast());
+    let mut encoder = flate2::write::ZlibEncoder::new(
+        Vec::with_capacity(data.len()),
+        flate2::Compression::fast(),
+    );
     encoder
         .write_all(data)
         .map_err(|e| PigeonError::CompressionFailed(e.to_string()))?;
@@ -95,7 +98,7 @@ pub fn decompress_bounded(compressed: &[u8], expected: u64) -> Result<Vec<u8>, P
             limit: MAX_DECOMPRESSED_SIZE,
         });
     }
-    let cap = expected.min(MAX_DECOMPRESSED_SIZE) as u64;
+    let cap = expected.min(MAX_DECOMPRESSED_SIZE);
     let mut decoder = flate2::read::ZlibDecoder::new(compressed).take(cap + 1);
     let mut out = Vec::new();
     decoder
@@ -128,7 +131,7 @@ mod tests {
     #[test]
     fn already_compressed_formats_are_skipped() {
         let mut zip = b"PK\x03\x04".to_vec();
-        zip.extend(std::iter::repeat(b'A').take(100_000));
+        zip.extend(std::iter::repeat_n(b'A', 100_000));
         let (payload, algo) = prepare_payload(&zip, CompressionMode::Auto).expect("ok");
         assert_eq!(algo, Compression::None);
         assert_eq!(payload.len(), zip.len());
@@ -137,7 +140,7 @@ mod tests {
     #[test]
     fn jpeg_is_skipped() {
         let mut jpeg = vec![0xFF, 0xD8, 0xFF];
-        jpeg.extend(std::iter::repeat(b'B').take(50_000));
+        jpeg.extend(std::iter::repeat_n(b'B', 50_000));
         let (_, algo) = prepare_payload(&jpeg, CompressionMode::Auto).expect("ok");
         assert_eq!(algo, Compression::None);
     }
@@ -186,21 +189,18 @@ mod tests {
     fn decompression_bomb_is_capped() {
         // zlib stream that would expand to 100 MB of 'A'
         use std::io::Write;
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
         encoder
             .write_all(&vec![b'A'; 100 * 1024 * 1024])
             .expect("write");
         let bomb = encoder.finish().expect("finish");
         let result = decompress_bounded(&bomb, 1000); // claims 1000 bytes
-        // Either the hard limit trips during the bounded read or the exact-size
-        // check fails afterwards; both reject the bomb.
+                                                      // Either the hard limit trips during the bounded read or the exact-size
+                                                      // check fails afterwards; both reject the bomb.
         assert!(matches!(
             result,
-            Err(
-                PigeonError::DecompressionLimitExceeded { .. }
-                    | PigeonError::DecompressedSizeMismatch { .. }
-            )
+            Err(PigeonError::DecompressionLimitExceeded { .. }
+                | PigeonError::DecompressedSizeMismatch { .. })
         ));
     }
 

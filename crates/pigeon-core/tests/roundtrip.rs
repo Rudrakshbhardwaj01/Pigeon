@@ -39,7 +39,12 @@ fn decode_qr_rgba(rgba: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
 /// of each block (nearest-neighbour). Averaging would blur module edges into
 /// greys that a global-threshold decoder struggles with; a coarse camera view
 /// still resolves crisp module boundaries.
-fn downscale_rgba(rgba: &[u8], width: usize, height: usize, factor: usize) -> (Vec<u8>, usize, usize) {
+fn downscale_rgba(
+    rgba: &[u8],
+    width: usize,
+    height: usize,
+    factor: usize,
+) -> (Vec<u8>, usize, usize) {
     let nw = width / factor;
     let nh = height / factor;
     let mut out = vec![0u8; nw * nh * 4];
@@ -83,7 +88,8 @@ fn run_optical_roundtrip(
     let scale = pigeon_core::encoder::gif::scale_for_target_px(900, modules);
 
     // ---- assemble GIF ----
-    let gif_bytes = pigeon_core::encoder::gif::encode_gif(&matrices, scale, transfer.stats.frame_delay_ms)?;
+    let gif_bytes =
+        pigeon_core::encoder::gif::encode_gif(&matrices, scale, transfer.stats.frame_delay_ms)?;
     assert!(gif_bytes.starts_with(b"GIF89a"));
 
     // ---- receive: parse GIF, decode QR, ingest packets ----
@@ -97,14 +103,23 @@ fn run_optical_roundtrip(
     while let Some(frame) = stream.next_frame()? {
         outcome.frames_seen += 1;
         if let Some(n) = drop_every_nth {
-            if outcome.frames_seen % n == 0 {
+            if outcome.frames_seen.is_multiple_of(n) {
                 continue; // simulate a missed frame
             }
         }
         let (rgba, w, h) = if downscale_factor > 1 {
-            downscale_rgba(&frame.data, frame.width as usize, frame.height as usize, downscale_factor)
+            downscale_rgba(
+                &frame.data,
+                frame.width as usize,
+                frame.height as usize,
+                downscale_factor,
+            )
         } else {
-            (frame.data.clone(), frame.width as usize, frame.height as usize)
+            (
+                frame.data.clone(),
+                frame.width as usize,
+                frame.height as usize,
+            )
         };
         if let Some(bytes) = decode_qr_rgba(&rgba, w, h) {
             outcome.packets_decoded += 1;
@@ -137,7 +152,8 @@ fn base_config(name: &str) -> EncodeConfig {
 #[test]
 fn optical_roundtrip_text_file() {
     let data = b"Pigeon carries this message between two machines.\
-        No network. No server. Just light.".to_vec();
+        No network. No server. Just light."
+        .to_vec();
     let (_, out) = run_optical_roundtrip(&data, base_config("message.txt"), None, 1)
         .expect("full pipeline roundtrip");
     assert!(out.packets_decoded >= 2);
@@ -148,8 +164,8 @@ fn optical_roundtrip_binary_all_byte_values() {
     // Every byte value in a non-trivial sequence — catches any text/UTF-8
     // assumptions in the QR payload path.
     let data: Vec<u8> = (0..=255u8).cycle().take(8_192).collect();
-    let (_, _) = run_optical_roundtrip(&data, base_config("binary.bin"), None, 1)
-        .expect("binary roundtrip");
+    let (_, _) =
+        run_optical_roundtrip(&data, base_config("binary.bin"), None, 1).expect("binary roundtrip");
 }
 
 #[test]
@@ -182,8 +198,8 @@ fn optical_roundtrip_with_frame_loss() {
         ..base_config("lossy.bin")
     };
     // drop every 5th frame (~20% loss) — FEC must recover
-    let (_, out) = run_optical_roundtrip(&data, cfg, Some(5), 1)
-        .expect("recovers with 20% frame loss");
+    let (_, out) =
+        run_optical_roundtrip(&data, cfg, Some(5), 1).expect("recovers with 20% frame loss");
     assert!(out.packets_decoded < out.frames_seen);
 }
 
@@ -224,14 +240,18 @@ fn optical_roundtrip_out_of_order_frames() {
     let mut engine = DecoderEngine::default();
     let mut stream = GifFrameStream::new(&gif_bytes).expect("opens");
     while let Some(frame) = stream.next_frame().expect("frame") {
-        if let Some(bytes) = decode_qr_rgba(&frame.data, frame.width as usize, frame.height as usize)
+        if let Some(bytes) =
+            decode_qr_rgba(&frame.data, frame.width as usize, frame.height as usize)
         {
             engine.ingest_packet(&bytes).expect("ingest");
         }
     }
     let status = engine.active_status().expect("tracked");
     assert_eq!(status.phase, "verified");
-    let file = engine.take_file(status.transfer_id).expect("ok").expect("file");
+    let file = engine
+        .take_file(status.transfer_id)
+        .expect("ok")
+        .expect("file");
     assert_eq!(file.data, data);
 }
 
@@ -248,8 +268,6 @@ fn optical_roundtrip_multiple_transfers_one_gif_stream() {
     let mb = pigeon_core::encoder::encode_qr_matrices(&tb, &EncodeConfig::default()).expect("qr b");
 
     let mut engine = DecoderEngine::default();
-    let mut seen_a = 0;
-    let mut seen_b = 0;
     for (ia, ib) in ma.iter().zip(mb.iter()) {
         for m in [ia, ib] {
             // render matrix into RGBA at scale 8 and decode
@@ -259,17 +277,18 @@ fn optical_roundtrip_multiple_transfers_one_gif_stream() {
             let rgba = grayscale_to_rgba(&bitmap);
             if let Some(bytes) = decode_qr_rgba(&rgba, side, side) {
                 engine.ingest_packet(&bytes).expect("ingest");
-                if std::ptr::eq(m, ia) {
-                    seen_a += 1;
-                } else {
-                    seen_b += 1;
-                }
             }
         }
     }
     assert_eq!(engine.all_statuses().len(), 2);
-    let fa = engine.take_file(ta.stats.transfer_id).expect("ok").expect("a");
-    let fb = engine.take_file(tb.stats.transfer_id).expect("ok").expect("b");
+    let fa = engine
+        .take_file(ta.stats.transfer_id)
+        .expect("ok")
+        .expect("a");
+    let fb = engine
+        .take_file(tb.stats.transfer_id)
+        .expect("ok")
+        .expect("b");
     assert_eq!(fa.data, a);
     assert_eq!(fb.data, b);
 }
@@ -297,7 +316,8 @@ fn qr_version_and_capacity_are_consistent() {
 fn incomplete_transfer_reports_honestly() {
     let data = vec![1u8; 80_000];
     let transfer = encode_file(&data, base_config("partial.bin")).expect("encodes");
-    let matrices = pigeon_core::encoder::encode_qr_matrices(&transfer, &EncodeConfig::default()).expect("qr");
+    let matrices =
+        pigeon_core::encoder::encode_qr_matrices(&transfer, &EncodeConfig::default()).expect("qr");
 
     let mut engine = DecoderEngine::default();
     // ingest only the first 20% of frames
@@ -314,4 +334,80 @@ fn incomplete_transfer_reports_honestly() {
     let status = engine.active_status().expect("tracked");
     assert_ne!(status.phase, "verified");
     assert!(engine.take_file(status.transfer_id).expect("ok").is_none());
+}
+
+/// Complete optical roundtrip of an **encrypted** transfer: the sealed object
+/// travels through the same QR/GIF pipeline, and only the correct passphrase
+/// turns the captured frames into the original bytes.
+#[test]
+fn encrypted_optical_roundtrip_with_passphrase() {
+    use pigeon_core::encoder::EncryptionConfig;
+    use zeroize::Zeroizing;
+
+    let data: Vec<u8> = (0..12_000u32).map(|i| ((i * 31 + 7) % 253) as u8).collect();
+    let cfg = EncodeConfig {
+        filename: "encrypted.txt".into(),
+        mime_type: Some("text/plain".into()),
+        overhead_percent: 40,
+        encryption: Some(EncryptionConfig {
+            passphrase: Zeroizing::new("optical secret".into()),
+            kdf: pigeon_core::crypto::KdfParams {
+                mem_kib: 8 * 1024,
+                passes: 1,
+                lanes: 1,
+            },
+        }),
+        ..Default::default()
+    };
+    let transfer = encode_file(&data, cfg).expect("encodes");
+    assert!(transfer.stats.encrypted);
+
+    // The optical carrier must not leak the plaintext or the filename.
+    let matrices =
+        pigeon_core::encoder::encode_qr_matrices(&transfer, &EncodeConfig::default()).expect("qr");
+    let modules = matrices[0].size + 2 * pigeon_core::encoder::gif::QUIET_MODULES;
+    let scale = pigeon_core::encoder::gif::scale_for_target_px(900, modules);
+    let gif_bytes =
+        pigeon_core::encoder::gif::encode_gif(&matrices, scale, transfer.stats.frame_delay_ms)
+            .expect("gif");
+
+    let mut engine = DecoderEngine::default();
+    let mut frames_seen = 0;
+    let mut stream = GifFrameStream::new(&gif_bytes).expect("opens");
+    while let Some(frame) = stream.next_frame().expect("frame") {
+        frames_seen += 1;
+        if let Some(bytes) =
+            decode_qr_rgba(&frame.data, frame.width as usize, frame.height as usize)
+        {
+            engine.ingest_packet(&bytes).expect("ingest");
+        }
+    }
+    assert!(frames_seen >= 2);
+
+    let status = engine.active_status().expect("tracked");
+    assert_eq!(status.phase, "awaiting-passphrase", "status: {status:?}");
+    assert!(status.encrypted);
+    assert!(
+        status.filename.is_none(),
+        "filename must not leak before decryption"
+    );
+
+    // Wrong passphrase: honest rejection, still paused.
+    let outcome = engine.set_passphrase("not it").expect("applies");
+    assert_eq!(outcome.rejected, 1);
+    let status = engine.active_status().expect("tracked");
+    assert_eq!(status.phase, "awaiting-passphrase");
+
+    // Correct passphrase: full verified reconstruction.
+    let outcome = engine.set_passphrase("optical secret").expect("applies");
+    assert_eq!(outcome.unlocked, 1);
+    let status = engine.active_status().expect("tracked");
+    assert_eq!(status.phase, "verified", "status: {status:?}");
+    let file = engine
+        .take_file(status.transfer_id)
+        .expect("ok")
+        .expect("file");
+    assert_eq!(file.data, data, "reconstruction must be byte-exact");
+    assert_eq!(file.sha256, sha256_hex(&data));
+    assert_eq!(file.filename, "encrypted.txt");
 }

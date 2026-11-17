@@ -1,7 +1,18 @@
-# Pigeon Wire Protocol — v1
+# Pigeon Wire Protocol — v1 and v2
 
-Status: **Stable** (implemented in `crates/pigeon-core/src/protocol/`).
+Status: **Stable** (implemented in `crates/pigeon-core/src/protocol/` and
+`crates/pigeon-core/src/crypto/`).
 Encoding: all multi-byte integers are **little-endian** unless noted.
+
+Two protocol versions exist:
+
+- **v1** — the original dialect; payloads are plaintext. Unencrypted
+  transfers are emitted as v1 and remain byte-compatible with older
+  receivers.
+- **v2** — the encrypted dialect; every payload is an authenticated-encryption
+  envelope (§8). v2 requires flag bit 3 set; v1 forbids it. A receiver that
+  does not understand v2 rejects v2 packets with an explicit
+  unsupported-version error (never silent salvage).
 
 ---
 
@@ -48,7 +59,8 @@ magic and verify them in a single pass.
 ```text
 bit 0      : 1 = metadata packet, 0 = symbol packet
 bits 1-2   : FEC scheme (0 = RaptorQ per RFC 6330)
-bits 3-7   : reserved — must be 0 in v1; receivers reject unknown bits
+bit 3      : 1 = payload is an encryption envelope (v2 only; v1 forbids it)
+bits 4-7   : reserved — must be 0 in v1 and v2; receivers reject unknown bits
 ```
 
 ### 2.2 Limits (v1)
@@ -149,9 +161,116 @@ metadata packets are idempotent.
 
 ## 7. Version compatibility
 
-- Receivers MUST reject packets whose version byte differs from 0x01 with an
-  explicit `unsupported protocol version` error (never silent salvage).
+- Receivers MUST reject packets whose version byte is neither 0x01 nor 0x02
+  with an explicit `unsupported protocol version` error (never silent
+  salvage).
+- v1 packets MUST NOT carry flag bit 3 (encryption); v2 packets MUST carry
+  it. Mismatched combinations are hard errors.
 - Receivers MUST reject packets with unknown flag bits set.
-- Unknown compression ids and unknown FEC schemes are hard errors.
+- Unknown compression ids, unknown FEC schemes, unknown cipher ids, unknown
+  KDF ids and out-of-range KDF parameters are hard errors.
 - Forward-compatible additions must use the reserved flag space and bump the
   version byte when wire-incompatible.
+
+## 8. Encrypted transfers (v2)
+
+Encrypted transfers wrap **every** packet payload in an authenticated
+encryption envelope before the packet header is written. The construction
+uses only established primitives (RustCrypto crates; no custom cryptography):
+
+- **KDF:** Argon2id, 32-byte output key. Cost parameters travel in the
+  plaintext metadata envelope (§8.2) and are validated against hard caps
+  (memory 8–64 MiB, passes 1–16, lanes 1–8) **before** any derivation runs —
+  a hostile sender cannot force an unbounded receiver allocation. Defaults:
+  m = 19456 KiB, t = 2, p = 1 (OWASP recommendation).
+- **AEAD:** XChaCha20-Poly1305, fresh random 192-bit nonce per sealed value.
+  The Poly1305 tag authenticates ciphertext **and associated data**.
+
+### 8.1 Associated data — the transfer binding
+
+The AEAD associated data is the packet header bytes `[2..16]` — protocol
+version, flags, transfer id and payload length. Consequences:
+
+- A packet sealed for transfer A cannot be accepted by a receiver tracking
+  it as transfer B (the tag binds the transfer id).
+- Version, flags and payload length cannot be tampered with without breaking
+  authentication. CRC32C covers the same range as a fast pre-check; the AEAD
+  tag is the cryptographic guarantee.
+
+### 8.2 Metadata envelope (v2 metadata packets)
+
+```text
+offset  size  field
+0       1     envelope version (= 1)
+1       1     cipher id (1 = XChaCha20-Poly1305)
+2       1     KDF id (1 = Argon2id)
+3       4     Argon2id memory cost, KiB (u32 LE)
+7       4     Argon2id passes (u32 LE)
+11      4     Argon2id lanes (u32 LE)
+15      16    KDF salt
+31      24    per-packet nonce (random)
+55      2     inner payload length N (u16 LE)
+57      N     ciphertext of the inner payload
+        16    Poly1305 tag (follows the ciphertext)
+```
+
+The inner payload is exactly the §4 metadata payload (OTI, compression id,
+original size, SHA-256, filename, MIME). Because it is sealed, the receiver
+learns **nothing** about the file (name, size, type, checksum) until it
+derives a key from the passphrase. The plaintext leakage surface of an
+encrypted transfer is: transfer id, salt, KDF parameters, envelope/packet
+sizes (and therefore coarse volume), and timing.
+
+### 8.3 Symbol envelope (v2 symbol packets)
+
+```text
+offset  size  field
+0       1     envelope version (= 1)
+1       1     cipher id (1 = XChaCha20-Poly1305)
+2       24    per-packet nonce (random)
+26      2     inner payload length N (u16 LE)
+28      N     ciphertext of the inner payload
+        16    Poly1305 tag (follows the ciphertext)
+```
+
+The inner payload is exactly the §3 symbol payload (payload id + symbol).
+
+### 8.4 Object sealing
+
+Independently of the per-packet envelopes, the whole transmitted object —
+the file after optional compression — is sealed once:
+
+```text
+sealed object = object nonce (24 B) || ciphertext || tag (16 B)
+```
+
+with the transfer id (u64 LE) as associated data. The sealed object is what
+the fountain code transmits; the OTI therefore describes the sealed length.
+Reconstruction yields the sealed blob, which is opened (authenticating
+against the transfer id) **before** decompression and checksum verification.
+The object tag rides at the end of the transmitted data and needs no extra
+metadata field.
+
+### 8.5 Receive rules for v2
+
+- Envelope prefixes are parsed before decryption (ids, KDF caps, length
+  consistency); violations are hard errors.
+- A transfer whose metadata envelope has been seen but whose passphrase has
+  not been provided pauses in an `awaiting-passphrase` state. Sealed symbol
+  packets arriving before the key exist are buffered (same 4096 cap as v1
+  pre-metadata buffering) and replayed once a key is derived.
+- Authentication failure on a symbol packet (wrong passphrase, corruption)
+  is counted per transfer and never mutates decoder state; a wrong
+  passphrase keeps the gate open for retry.
+- Deduplication of sealed packets is impossible before the key exists
+  (payload ids are inside the ciphertext); duplicate detection resumes after
+  decryption. This is a documented trade-off, bounded by the buffering cap.
+- Empty files: an encrypted transfer of an empty file still transmits its
+  40-byte sealed object (nonce + tag) as one symbol — unlike v1, which
+  completes from metadata alone — so the receiver authenticates the object.
+
+### 8.6 QR geometry impact
+
+The per-packet envelope adds 44 bytes of wire overhead (envelope header +
+tag), so v2 transfers select a slightly larger QR version for the same
+symbol size target. v1 geometry is unchanged.

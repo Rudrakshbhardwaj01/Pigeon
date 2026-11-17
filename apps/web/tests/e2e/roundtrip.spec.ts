@@ -209,3 +209,50 @@ test("camera mode starts with fake media stream", async ({ page }) => {
   }
   await expect(page.getByRole("button", { name: /stop camera|start camera/i })).toBeVisible();
 });
+
+test("encrypted transfer roundtrips with the correct passphrase", async ({ page }) => {
+  const passphrase = "e2e optical secret";
+
+  // Send: enable encryption, provide (and confirm) the passphrase.
+  await page.goto("/");
+  await sendSection(page).getByRole("button", { name: /drop a file/i }).click();
+  await sendSection(page).locator('input[type="file"]').setInputFiles(path.join(fixtures, "hello.txt"));
+  await sendSection(page).getByRole("button", { name: /encryption off/i }).click();
+  await sendSection(page).getByLabel("Passphrase", { exact: true }).fill(passphrase);
+  await sendSection(page).getByLabel("Confirm passphrase", { exact: true }).fill(passphrase);
+  await page.getByRole("button", { name: /encode to gif/i }).click();
+  await expect(page.getByRole("heading", { name: "Transfer ready" })).toBeVisible({
+    timeout: 60_000,
+  });
+  // The result must say the transfer is encrypted.
+  await expect(
+    page.getByText(/Argon2id \+ XChaCha20-Poly1305/i)
+  ).toBeVisible();
+
+  const gifPath = await downloadGif(page);
+
+  // Receive: the passphrase gate must appear — filename stays hidden.
+  await importGif(page, gifPath);
+  await expect(page.getByText(/this transfer is encrypted/i)).toBeVisible({
+    timeout: 60_000,
+  });
+
+  // Wrong passphrase: honest rejection, gate stays up.
+  await page.getByLabel("Transfer passphrase").fill("wrong passphrase entirely");
+  await page.getByRole("button", { name: /decrypt/i }).click();
+  await expect(page.getByText(/did not decrypt/i)).toBeVisible({ timeout: 30_000 });
+
+  // Correct passphrase: verified reconstruction, byte-exact download.
+  await page.getByLabel("Transfer passphrase").fill(passphrase);
+  await page.getByRole("button", { name: /decrypt/i }).click();
+  await expect(
+    page.getByRole("heading", { name: /file recovered & verified/i })
+  ).toBeVisible({ timeout: 60_000 });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: /download hello.txt/i }).click();
+  const download = await downloadPromise;
+  const outPath = path.join(thisDir, "../.tmp-download/recovered-encrypted.txt");
+  await download.saveAs(outPath);
+  expect(readFileSync(outPath).equals(readFileSync(path.join(fixtures, "hello.txt")))).toBe(true);
+});

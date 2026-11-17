@@ -254,6 +254,26 @@ export class Receiver {
         wasm.receiver_reset(this.__wbg_ptr);
     }
     /**
+     * Provides the passphrase for encrypted transfers.
+     *
+     * Unlocks every transfer currently paused at the passphrase gate and is
+     * remembered for transfers whose metadata has not arrived yet. Returns
+     * `{ unlocked, rejected }`: `rejected` counts transfers whose
+     * decryption failed with this passphrase (wrong passphrase for their
+     * salt); those transfers stay paused and may be retried.
+     * @param {string} passphrase
+     * @returns {any}
+     */
+    setPassphrase(passphrase) {
+        const ptr0 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.receiver_setPassphrase(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Status of one transfer (`transferId` is a 16-char hex string) or `null`.
      * @param {string} transfer_id
      * @returns {any}
@@ -298,6 +318,24 @@ export function encode_gif(data, params) {
     const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.encode_gif(ptr0, len0, params);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Pre-encode estimate for a file of `size_bytes` (no data needed, no
+ * fountain or rendering work): QR geometry, frame-count bounds at the
+ * configured redundancy, loop duration and a GIF size estimate.
+ *
+ * Returns the same shape as the engine's `TransferEstimate` (camelCase).
+ * @param {bigint} size_bytes
+ * @param {any} params
+ * @returns {any}
+ */
+export function estimateTransfer(size_bytes, params) {
+    const ret = wasm.estimateTransfer(size_bytes, params);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

@@ -3,7 +3,9 @@
 
 use crate::error::PigeonError;
 
-use super::{header::write_packet, FLAG_METADATA, MAX_FILENAME_BYTES, MAX_MIME_BYTES};
+use super::{
+    header::write_packet_v1 as write_packet, FLAG_METADATA, MAX_FILENAME_BYTES, MAX_MIME_BYTES,
+};
 
 /// How the transmitted (post-FEC) payload was compressed before encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,8 +55,11 @@ pub struct TransferMetadata {
 /// 57    f  filename (UTF-8)
 ///       m  MIME (ASCII)
 /// ```
-pub fn serialize_metadata_packet(
-    transfer_id: u64,
+/// Serializes the metadata payload (no packet header).
+///
+/// Encrypted transfers wrap this payload in an authenticated-encryption
+/// envelope; see `crate::crypto::envelope`.
+pub fn serialize_metadata_payload(
     oti: &[u8; 12],
     meta: &TransferMetadata,
 ) -> Result<Vec<u8>, PigeonError> {
@@ -71,7 +76,16 @@ pub fn serialize_metadata_packet(
     payload.extend_from_slice(&(mime.len() as u16).to_le_bytes());
     payload.extend_from_slice(fname);
     payload.extend_from_slice(mime);
+    Ok(payload)
+}
 
+/// Serializes a complete unencrypted (v1) metadata packet.
+pub fn serialize_metadata_packet(
+    transfer_id: u64,
+    oti: &[u8; 12],
+    meta: &TransferMetadata,
+) -> Result<Vec<u8>, PigeonError> {
+    let payload = serialize_metadata_payload(oti, meta)?;
     Ok(write_packet(FLAG_METADATA, transfer_id, &payload))
 }
 
@@ -89,8 +103,10 @@ pub fn parse_metadata_payload(payload: &[u8]) -> Result<([u8; 12], TransferMetad
     let original_size = u64::from_le_bytes(payload[13..21].try_into().expect("fixed 8-byte slice"));
     let mut sha256 = [0u8; 32];
     sha256.copy_from_slice(&payload[21..53]);
-    let fname_len = u16::from_le_bytes(payload[53..55].try_into().expect("fixed 2-byte slice")) as usize;
-    let mime_len = u16::from_le_bytes(payload[55..57].try_into().expect("fixed 2-byte slice")) as usize;
+    let fname_len =
+        u16::from_le_bytes(payload[53..55].try_into().expect("fixed 2-byte slice")) as usize;
+    let mime_len =
+        u16::from_le_bytes(payload[55..57].try_into().expect("fixed 2-byte slice")) as usize;
 
     let total = 57usize
         .checked_add(fname_len)
@@ -125,8 +141,12 @@ pub fn parse_metadata_payload(payload: &[u8]) -> Result<([u8; 12], TransferMetad
     let mime_str = mime_str.trim().to_ascii_lowercase();
     let mime_type = if mime_str.is_empty() {
         None
-    } else if mime_str.len() > MAX_MIME_BYTES || !mime_str.bytes().all(|b| b.is_ascii_graphic() || b == b'/') {
-        return Err(PigeonError::BadMetadata("MIME type contains invalid characters".into()));
+    } else if mime_str.len() > MAX_MIME_BYTES
+        || !mime_str.bytes().all(|b| b.is_ascii_graphic() || b == b'/')
+    {
+        return Err(PigeonError::BadMetadata(
+            "MIME type contains invalid characters".into(),
+        ));
     } else {
         Some(mime_str)
     };
@@ -147,11 +167,15 @@ fn validate_metadata(meta: &TransferMetadata) -> Result<(), PigeonError> {
         return Err(PigeonError::FilenameEmpty);
     }
     if meta.filename.len() > MAX_FILENAME_BYTES {
-        return Err(PigeonError::FilenameTooLong { max: MAX_FILENAME_BYTES });
+        return Err(PigeonError::FilenameTooLong {
+            max: MAX_FILENAME_BYTES,
+        });
     }
     if let Some(mime) = &meta.mime_type {
         if mime.len() > MAX_MIME_BYTES {
-            return Err(PigeonError::MimeTooLong { max: MAX_MIME_BYTES });
+            return Err(PigeonError::MimeTooLong {
+                max: MAX_MIME_BYTES,
+            });
         }
     }
     Ok(())
@@ -175,8 +199,8 @@ const WINDOWS_RESERVED: [&str; 22] = [
 pub fn sanitize_filename(input: &str) -> String {
     let mut out = String::with_capacity(input.len().min(MAX_FILENAME_BYTES));
     for ch in input.chars() {
-        let bad = matches!(ch, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*')
-            || ch.is_control();
+        let bad =
+            matches!(ch, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*') || ch.is_control();
         out.push(if bad { '_' } else { ch });
     }
     let trimmed = out.trim_matches(|c: char| c == '.' || c.is_whitespace());
@@ -265,7 +289,10 @@ mod tests {
     fn sanitize_paths() {
         assert_eq!(sanitize_filename("../../etc/passwd"), "_.._etc_passwd");
         assert_eq!(sanitize_filename("C:\\temp\\evil.exe"), "C__temp_evil.exe");
-        assert_eq!(sanitize_filename("/abs/path/file.txt"), "_abs_path_file.txt");
+        assert_eq!(
+            sanitize_filename("/abs/path/file.txt"),
+            "_abs_path_file.txt"
+        );
     }
 
     #[test]

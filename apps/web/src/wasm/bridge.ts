@@ -9,6 +9,7 @@ import initModule, {
   GifFrameStream as GenGifFrameStream,
   Receiver as GenReceiver,
   encode_gif as genEncodeGif,
+  estimateTransfer as genEstimateTransfer,
   prepare_transfer as genPrepareTransfer,
   sanitizeFilename as genSanitizeFilename,
   protocol_version as genProtocolVersion,
@@ -22,6 +23,7 @@ import type {
   PreparedTransfer,
   QrMatrix,
   Receiver,
+  TransferEstimate,
 } from "./wasm-types";
 
 export type {
@@ -38,6 +40,7 @@ export type {
   QrFrameSession,
   ReconstructedFile,
   Receiver,
+  TransferEstimate,
   TransferStatus,
 } from "./wasm-types";
 
@@ -67,6 +70,10 @@ export function prepareTransfer(
 
 export function encodeGif(data: Uint8Array, params?: EncodeParams): GifEncodeResult {
   return genEncodeGif(data, params) as GifEncodeResult;
+}
+
+export function estimateTransfer(sizeBytes: number, params?: EncodeParams): TransferEstimate {
+  return genEstimateTransfer(BigInt(sizeBytes), params) as TransferEstimate;
 }
 
 export function newReceiver(maxTransferBytes?: number): Receiver {

@@ -55,6 +55,22 @@ pub enum PigeonError {
     #[error("checksum verification failed: expected {expected}, computed {computed}")]
     ChecksumMismatch { expected: String, computed: String },
 
+    // ---- cryptography (protocol v2) ----
+    #[error("encryption failed")]
+    EncryptionFailed,
+    #[error("decryption failed: the passphrase is wrong or the transfer is corrupted")]
+    DecryptionFailed,
+    #[error("this transfer is encrypted; a passphrase is required")]
+    PassphraseRequired,
+    #[error("unsupported cipher id {0}")]
+    UnsupportedCipher(u8),
+    #[error("unsupported KDF id {0}")]
+    UnsupportedKdf(u8),
+    #[error("invalid KDF parameters: {detail}")]
+    KdfParamsExcessive { detail: String },
+    #[error("cryptographic subsystem error: {0}")]
+    CryptoInit(String),
+
     // ---- QR / GIF ----
     #[error("QR encoding failed: {0}")]
     QrEncodeFailed(String),

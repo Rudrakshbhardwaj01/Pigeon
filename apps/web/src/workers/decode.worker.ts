@@ -40,13 +40,19 @@ export interface StatusRequest {
   kind: "status";
 }
 
+export interface SetPassphraseRequest {
+  kind: "set-passphrase";
+  passphrase: string;
+}
+
 export type DecodeRequest =
   | ImportGifRequest
   | IngestPacketsRequest
   | TakeFileRequest
   | ResetRequest
   | CancelImportRequest
-  | StatusRequest;
+  | StatusRequest
+  | SetPassphraseRequest;
 
 export interface DecodeProgress {
   id: number;
@@ -62,6 +68,8 @@ export interface DecodeProgress {
   filename: string | null;
   mimeType: string | null;
   originalSize: number | null;
+  encrypted: boolean;
+  failedDecryptions: number;
 }
 
 export type DecodeResponse =
@@ -116,6 +124,8 @@ function snapshot(
     filename: status?.filename ?? null,
     mimeType: status?.mimeType ?? null,
     originalSize: status?.originalSize ?? null,
+    encrypted: status?.encrypted ?? false,
+    failedDecryptions: status?.failedDecryptions ?? 0,
   };
 }
 
@@ -183,6 +193,16 @@ async function handle(request: DecodeRequest, requestId: number): Promise<void> 
         all: rx.allStatuses(),
       },
     });
+    return;
+  }
+
+  if (request.kind === "set-passphrase") {
+    // Unlocks paused transfers; the receiver remembers the passphrase for
+    // transfers whose metadata has not arrived yet. The response carries the
+    // post-unlock status so the UI can proceed to download when verified.
+    const rx = requireReceiver();
+    const outcome = rx.setPassphrase(request.passphrase);
+    post({ id: requestId, kind: "ok", result: { outcome, active: rx.activeStatus() } });
     return;
   }
 

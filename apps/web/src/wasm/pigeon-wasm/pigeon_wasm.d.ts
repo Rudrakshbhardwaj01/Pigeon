@@ -99,6 +99,16 @@ export class Receiver {
      */
     reset(): void;
     /**
+     * Provides the passphrase for encrypted transfers.
+     *
+     * Unlocks every transfer currently paused at the passphrase gate and is
+     * remembered for transfers whose metadata has not arrived yet. Returns
+     * `{ unlocked, rejected }`: `rejected` counts transfers whose
+     * decryption failed with this passphrase (wrong passphrase for their
+     * salt); those transfers stay paused and may be retried.
+     */
+    setPassphrase(passphrase: string): any;
+    /**
      * Status of one transfer (`transferId` is a 16-char hex string) or `null`.
      */
     statusOf(transfer_id: string): any;
@@ -116,6 +126,15 @@ export class Receiver {
  * Returns `{ gif: Uint8Array, stats }`.
  */
 export function encode_gif(data: Uint8Array | number[], params: any): any;
+
+/**
+ * Pre-encode estimate for a file of `size_bytes` (no data needed, no
+ * fountain or rendering work): QR geometry, frame-count bounds at the
+ * configured redundancy, loop duration and a GIF size estimate.
+ *
+ * Returns the same shape as the engine's `TransferEstimate` (camelCase).
+ */
+export function estimateTransfer(size_bytes: bigint, params: any): any;
 
 /**
  * Prepares a transfer: wire packets are encoded up front, QR matrices are
@@ -145,6 +164,7 @@ export interface InitOutput {
     readonly __wbg_qrframesession_free: (a: number, b: number) => void;
     readonly __wbg_receiver_free: (a: number, b: number) => void;
     readonly encode_gif: (a: number, b: number, c: any) => [number, number, number];
+    readonly estimateTransfer: (a: bigint, b: any) => [number, number, number];
     readonly gifbuilder_finish: (a: number) => [number, number, number, number];
     readonly gifbuilder_framesWritten: (a: number) => number;
     readonly gifbuilder_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
@@ -162,6 +182,7 @@ export interface InitOutput {
     readonly receiver_ingestPacket: (a: number, b: number, c: number) => [number, number, number];
     readonly receiver_new: (a: number) => number;
     readonly receiver_reset: (a: number) => void;
+    readonly receiver_setPassphrase: (a: number, b: number, c: number) => [number, number, number];
     readonly receiver_statusOf: (a: number, b: number, c: number) => [number, number, number];
     readonly receiver_takeFile: (a: number, b: number, c: number) => [number, number, number];
     readonly sanitizeFilename: (a: number, b: number) => [number, number];

@@ -18,6 +18,8 @@ export interface EncodeStats {
   totalFrames: number;
   frameDelayMs: number;
   neededPackets: number;
+  /** True when the transfer is encrypted (protocol v2). */
+  encrypted: boolean;
 }
 
 export interface QrMatrix {
@@ -37,6 +39,10 @@ export interface TransferStatus {
   progress: number | null;
   duplicates: number;
   bufferedSymbols: number;
+  /** True when the transfer is encrypted (protocol v2). */
+  encrypted: boolean;
+  /** Packets whose authentication failed after a key existed. */
+  failedDecryptions: number;
 }
 
 export interface IngestReport {
@@ -81,6 +87,12 @@ export interface EncodeParams {
   frameDelayMs?: number;
   maxFileSize?: number;
   targetFramePx?: number;
+  /** Non-empty passphrase enables encryption (protocol v2). */
+  passphrase?: string;
+  /** Optional Argon2id overrides; defaults follow the OWASP recommendation. */
+  kdfMemKib?: number;
+  kdfPasses?: number;
+  kdfLanes?: number;
 }
 
 export interface QrFrameSession {
@@ -102,6 +114,15 @@ export interface Receiver {
   counters(): DecoderCounters;
   takeFile(transferId: string): ReconstructedFile | null;
   reset(): void;
+  /** Unlocks paused encrypted transfers; also remembered for future ones. */
+  setPassphrase(passphrase: string): PassphraseOutcome;
+}
+
+export interface PassphraseOutcome {
+  /** Transfers that derived a key and continued past the gate. */
+  unlocked: number;
+  /** Transfers whose decryption failed (wrong passphrase). */
+  rejected: number;
 }
 
 export interface GifFrameStream {
@@ -112,6 +133,18 @@ export interface GifFrameStream {
 export interface PreparedTransfer {
   stats: EncodeStats;
   session: QrFrameSession;
+}
+
+/** Pre-encode shape estimate (bounds, never invented precision). */
+export interface TransferEstimate {
+  qrVersion: number;
+  qrEcl: string;
+  packetPayloadBytes: number;
+  framesIncompressible: number;
+  framesCompressibleOptimistic: number;
+  encrypted: boolean;
+  loopSeconds: number;
+  gifBytesEstimate: number;
 }
 
 export interface GifEncodeResult {

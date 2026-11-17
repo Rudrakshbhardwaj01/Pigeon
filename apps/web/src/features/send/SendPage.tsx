@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Download, File as FileIcon, Settings, X } from "lucide-react";
+import { ArrowRight, Download, File as FileIcon, Gauge, Lock, LockOpen, Settings, X } from "lucide-react";
 
 import { Dropzone } from "../../components/Dropzone";
 import { ErrorDisplay } from "../../components/ErrorDisplay";
@@ -8,7 +8,44 @@ import { downloadBlob } from "../../lib/download";
 import { formatBytes, formatDuration } from "../../lib/format";
 import { WorkerClient } from "../../lib/worker-client";
 import type { EncodeRequest, EncodeResponse } from "../../workers/encode.worker";
-import type { EncodeStats } from "../../wasm/bridge";
+import type { EncodeStats, TransferEstimate } from "../../wasm/bridge";
+
+/**
+ * Transfer presets: named bundles of real engine parameters. "Custom" is
+ * selected automatically whenever any control is changed by hand.
+ */
+const PRESETS = {
+  balanced: {
+    label: "Balanced",
+    hint: "20% redundancy · 4 fps · auto compression",
+    overhead: 20,
+    delayMs: 250,
+    compression: "auto" as const,
+  },
+  reliability: {
+    label: "Maximum reliability",
+    hint: "50% redundancy · easy 2.5 fps scanning",
+    overhead: 50,
+    delayMs: 400,
+    compression: "auto" as const,
+  },
+  fast: {
+    label: "Faster transmission",
+    hint: "10% redundancy · 8 fps · compression always on",
+    overhead: 10,
+    delayMs: 120,
+    compression: "on" as const,
+  },
+  camera: {
+    label: "Camera-friendly",
+    hint: "30% redundancy · easy scanning for live capture",
+    overhead: 30,
+    delayMs: 400,
+    compression: "auto" as const,
+  },
+} as const;
+
+type PresetId = keyof typeof PRESETS | "custom";
 
 interface EncodeProgressState {
   phase: "preparing" | "fountain" | "qr-gif" | "ready";
@@ -23,6 +60,20 @@ interface GifResult {
   durationMs: number;
 }
 
+/** Honest, length-based passphrase hint. Never claims true entropy. */
+function passphraseStrength(pw: string): { label: string; tone: "info" | "warning" } {
+  if (pw.length === 0) {
+    return { label: "Passphrase required for an encrypted transfer.", tone: "info" };
+  }
+  if (pw.length < 12) {
+    return { label: "Short passphrases are guessable — 12+ characters recommended.", tone: "warning" };
+  }
+  if (pw.length < 20) {
+    return { label: "Reasonable. A long unique phrase is stronger.", tone: "info" };
+  }
+  return { label: "Strong length. Share it over a channel the GIF does not travel on.", tone: "info" };
+}
+
 export function SendPage() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -33,6 +84,13 @@ export function SendPage() {
   const [overhead, setOverhead] = useState(20);
   const [delayMs, setDelayMs] = useState(250);
   const [compression, setCompression] = useState<"auto" | "on" | "off">("auto");
+  const [encrypt, setEncrypt] = useState(false);
+  const [passphrase, setPassphrase] = useState("");
+  const [passphraseConfirm, setPassphraseConfirm] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
+  const [passphraseError, setPassphraseError] = useState<string | null>(null);
+  const [presetId, setPresetId] = useState<PresetId>("balanced");
+  const [estimate, setEstimate] = useState<TransferEstimate | null>(null);
 
   const clientRef = useRef<WorkerClient<EncodeRequest, EncodeResponse> | null>(null);
   const resultUrlRef = useRef<string | null>(null);
@@ -64,10 +122,68 @@ export function SendPage() {
     clientRef.current?.send({ kind: "cancel" });
   }, []);
 
+  const toggleEncrypt = useCallback(() => {
+    setEncrypt((v) => !v);
+    setPassphrase("");
+    setPassphraseConfirm("");
+    setPassphraseError(null);
+  }, []);
+
+  /** Applies a preset's real parameters and marks it active. */
+  const applyPreset = useCallback((id: keyof typeof PRESETS) => {
+    const p = PRESETS[id];
+    setOverhead(p.overhead);
+    setDelayMs(p.delayMs);
+    setCompression(p.compression);
+    setPresetId(id);
+  }, []);
+
+  /** Manual control changes select "custom" (no preset is lying). */
+  const markCustom = useCallback(() => setPresetId("custom"), []);
+
+  // Pre-encode estimate: cheap (QR-capacity probing only), debounced, and
+  // refreshed whenever any parameter that changes geometry moves.
+  useEffect(() => {
+    if (!file) {
+      setEstimate(null);
+      return;
+    }
+    const client = clientRef.current;
+    if (!client) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void client
+        .call<{ estimate: TransferEstimate }>({
+          kind: "estimate",
+          size: file.size,
+          params: {
+            filename: file.name,
+            compression,
+            overheadPercent: overhead,
+            frameDelayMs: delayMs,
+            ...(encrypt && passphrase ? { passphrase } : {}),
+          },
+        } as Omit<EncodeRequest, "id">)
+        .then((res) => setEstimate(res.estimate))
+        .catch(() => setEstimate(null));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [file, overhead, delayMs, compression, encrypt, passphrase]);
+
   const encode = useCallback(async () => {
     if (!file || !clientRef.current) {
       return;
     }
+    if (encrypt && passphrase.length === 0) {
+      setPassphraseError("Enter a passphrase, or turn encryption off.");
+      return;
+    }
+    if (encrypt && passphrase !== passphraseConfirm) {
+      setPassphraseError("The two passphrases do not match.");
+      return;
+    }
+    setPassphraseError(null);
     setBusy(true);
     setError(null);
     setCancelled(false);
@@ -86,6 +202,7 @@ export function SendPage() {
             compression,
             overheadPercent: overhead,
             frameDelayMs: delayMs,
+            ...(encrypt && passphrase ? { passphrase } : {}),
           },
         } as Omit<EncodeRequest, "id">,
         (message) => {
@@ -117,7 +234,7 @@ export function SendPage() {
     } finally {
       setBusy(false);
     }
-  }, [file, overhead, delayMs, compression]);
+  }, [file, overhead, delayMs, compression, encrypt, passphrase, passphraseConfirm]);
 
   const reset = useCallback(() => {
     if (resultUrlRef.current) {
@@ -128,6 +245,9 @@ export function SendPage() {
     setProgress(null);
     setError(null);
     setCancelled(false);
+    // The passphrase is intentionally kept so a re-encode of a new file with
+    // the same settings does not require retyping it; clear it on explicit
+    // encryption toggle instead.
   }, []);
 
   const progressLabel =
@@ -192,16 +312,58 @@ export function SendPage() {
             </div>
           ) : null}
 
+          {file && estimate ? (
+            <div className="estimate-strip" role="status">
+              <Gauge size={15} strokeWidth={1.6} />
+              <span>
+                <strong>Estimate:</strong> up to ≈{estimate.framesIncompressible} frames
+                {estimate.framesCompressibleOptimistic < estimate.framesIncompressible
+                  ? ` (≈${estimate.framesCompressibleOptimistic} if the content compresses well)`
+                  : ""}{" "}
+                · ≈{formatBytes(estimate.gifBytesEstimate)} GIF · ≈
+                {formatDuration(estimate.loopSeconds * 1000)} per loop · QR v{estimate.qrVersion}
+                -{estimate.qrEcl.toUpperCase()}
+                {estimate.encrypted ? " · encrypted geometry" : ""}
+              </span>
+            </div>
+          ) : null}
+
           <div className="settings-card">
             <div className="settings-title">
               <Settings size={15} /> Transfer Settings
+            </div>
+            <div className="preset-row" role="radiogroup" aria-label="Transfer preset">
+              {(Object.keys(PRESETS) as Array<keyof typeof PRESETS>).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={presetId === id}
+                  className={`preset${presetId === id ? " active" : ""}`}
+                  onClick={() => applyPreset(id)}
+                  disabled={busy}
+                  title={PRESETS[id].hint}
+                >
+                  {PRESETS[id].label}
+                </button>
+              ))}
+              <span
+                role="radio"
+                aria-checked={presetId === "custom"}
+                className={`preset custom${presetId === "custom" ? " active" : ""}`}
+              >
+                Custom
+              </span>
             </div>
             <div className="settings-grid">
               <label className="field">
                 <span>Redundancy (overhead)</span>
                 <select
                   value={overhead}
-                  onChange={(e) => setOverhead(Number(e.target.value))}
+                  onChange={(e) => {
+                    setOverhead(Number(e.target.value));
+                    markCustom();
+                  }}
                   disabled={busy}
                 >
                   <option value={10}>10% — tight GIF</option>
@@ -215,7 +377,10 @@ export function SendPage() {
                 <span>Frame rate</span>
                 <select
                   value={delayMs}
-                  onChange={(e) => setDelayMs(Number(e.target.value))}
+                  onChange={(e) => {
+                    setDelayMs(Number(e.target.value));
+                    markCustom();
+                  }}
                   disabled={busy}
                 >
                   <option value={120}>120 ms — 8 fps fast capture</option>
@@ -228,7 +393,10 @@ export function SendPage() {
                 <span>Compression</span>
                 <select
                   value={compression}
-                  onChange={(e) => setCompression(e.target.value as "auto" | "on" | "off")}
+                  onChange={(e) => {
+                    setCompression(e.target.value as "auto" | "on" | "off");
+                    markCustom();
+                  }}
                   disabled={busy}
                 >
                   <option value="auto">Auto (skip media)</option>
@@ -236,6 +404,85 @@ export function SendPage() {
                   <option value="off">Off</option>
                 </select>
               </label>
+            </div>
+
+            <div className="encrypt-block">
+              <button
+                type="button"
+                className={`encrypt-toggle${encrypt ? " on" : ""}`}
+                onClick={toggleEncrypt}
+                disabled={busy}
+                aria-pressed={encrypt}
+              >
+                {encrypt ? <Lock size={15} /> : <LockOpen size={15} />}
+                <span>
+                  {encrypt ? "Encrypted transfer" : "Encryption off — the GIF holds the file in plaintext"}
+                </span>
+                <span className={`encrypt-state${encrypt ? " on" : ""}`}>{encrypt ? "On" : "Off"}</span>
+              </button>
+              {encrypt ? (
+                <div className="encrypt-fields">
+                  <div className="field">
+                    <span>Passphrase</span>
+                    <div className="passphrase-row">
+                      <input
+                        type={showPassphrase ? "text" : "password"}
+                        value={passphrase}
+                        onChange={(e) => {
+                          setPassphrase(e.target.value);
+                          setPassphraseError(null);
+                        }}
+                        autoComplete="new-password"
+                        disabled={busy}
+                        aria-label="Passphrase"
+                        placeholder="Shared separately from the GIF"
+                      />
+                      <button
+                        type="button"
+                        className="btn ghost small"
+                        onClick={() => setShowPassphrase((v) => !v)}
+                        aria-label={showPassphrase ? "Hide passphrase" : "Show passphrase"}
+                        disabled={busy}
+                      >
+                        {showPassphrase ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="field">
+                    <span>Confirm passphrase</span>
+                    <input
+                      type={showPassphrase ? "text" : "password"}
+                      value={passphraseConfirm}
+                      onChange={(e) => {
+                        setPassphraseConfirm(e.target.value);
+                        setPassphraseError(null);
+                      }}
+                      autoComplete="new-password"
+                      disabled={busy}
+                      aria-label="Confirm passphrase"
+                      placeholder="Repeat it exactly"
+                    />
+                  </div>
+                  {(() => {
+                    const s = passphraseStrength(passphrase);
+                    return (
+                      <p className={`hint passphrase-hint${s.tone === "warning" ? " warn" : ""}`}>
+                        {s.label}
+                      </p>
+                    );
+                  })()}
+                  {passphraseError ? (
+                    <p className="hint passphrase-hint warn" role="alert">
+                      {passphraseError}
+                    </p>
+                  ) : null}
+                  <p className="hint passphrase-hint">
+                    Encrypted transfers use Argon2id + XChaCha20-Poly1305: the file,
+                    filename and metadata are unreadable without the passphrase. The
+                    passphrase travels separately — never inside the GIF.
+                  </p>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -323,6 +570,10 @@ function EncodeResultView({ result, onReset }: { result: GifResult; onReset: () 
           <Stat
             label="Compression"
             value={s.compressionUsed ? "zlib (applied)" : "none"}
+          />
+          <Stat
+            label="Encryption"
+            value={s.encrypted ? "Argon2id + XChaCha20-Poly1305" : "none (plaintext GIF)"}
           />
           <Stat label="QR frames" value={String(s.totalFrames)} mono />
           <Stat label="Required packets" value={String(s.neededPackets)} mono />

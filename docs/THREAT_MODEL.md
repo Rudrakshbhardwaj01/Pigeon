@@ -19,26 +19,44 @@ post-download handling of files.
 | Actor | Capability | Interest |
 |---|---|---|
 | Sender / receiver | legitimate users | move a file exactly |
-| Eavesdropper | sees the screen, the GIF file, or the camera view | read the file (it is unencrypted) |
+| Eavesdropper | sees the screen, the GIF file, or the camera view | read the file (trivially for unencrypted transfers; fights the KDF for encrypted ones) |
 | Interceptor | modifies the GIF in transit (shared drive, messaging platform) | substitute a payload |
-| Malformed-input author | crafts GIFs/QR payloads targeting the decoder | crash, exhaust, or corrupt the receiver |
+| Malformed-input author | crafts GIFs/QR payloads/envelopes targeting the decoder | crash, exhaust (incl. via KDF parameters), or corrupt the receiver |
 | Platform (messaging app) | re-encodes media, resizes frames, converts to video | not adversarial, but lossy |
 
 ## Threats and mitigations
 
 ### T1 — File disclosure through the GIF (HIGH likelihood, HIGH impact)
-The GIF is plaintext by design; anyone holding it can reconstruct the file.
-**Mitigation: none inside Pigeon** — the UI and README state it plainly.
-Users must treat the GIF as the secret itself (hand-delivery, encrypted
-container around it, or future protocol-level encryption).
+Unencrypted GIFs are plaintext by design; anyone holding one can reconstruct
+the file. **Mitigation: optional protocol v2 encryption** — the sender can
+enable passphrase encryption (Argon2id + XChaCha20-Poly1305) so file bytes,
+filename and metadata are unreadable without the passphrase. Without it, the
+UI and README state plainly that the GIF is the secret itself. Residual
+risk: an observer of the optical channel sees the frames regardless
+(see T9); a weak passphrase weakens the guarantee.
 
 ### T2 — Transfer substitution (MEDIUM likelihood, HIGH impact)
 An interceptor swaps the GIF; a substitute carries its own valid SHA-256
 manifest, so the receiver cannot detect substitution from checksums alone.
-**Mitigation: out-of-band comparison.** The UI surfaces the sender's SHA-256
-before download; a receiver who can verify the hash out-of-band (e.g. read
-over phone) defeats substitution. Future: authenticated encryption binds the
-manifest to a sender key.
+**Mitigations:** (a) out-of-band comparison — the UI surfaces the sender's
+SHA-256 before download; (b) in encrypted transfers, packet and object
+authentication are bound to the transfer id with the passphrase-derived key,
+so an interceptor cannot forge a substitute without the passphrase, and the
+receiver detects the substitution as authentication failure instead of
+silently accepting it. Residual risk: an attacker who *knows the passphrase*
+can craft a substitute; possession of a passphrase authenticates knowledge,
+not identity.
+
+### T10 — Weak or mishandled passphrases (contextual, HIGH impact)
+Encryption concentrates the secrecy of the whole transfer into the
+passphrase. Short or reused passphrases are guessable; sharing it over the
+same channel as the GIF defeats the mode entirely. **Mitigations:** Argon2id
+with hard-capped, attacker-supplied-but-bounded parameters raises offline
+guessing cost; the UI gives honest length guidance and never transmits or
+stores the passphrase (it is zeroized after derivation); the README and
+UI copy direct users to share it separately from the GIF. **Residual risk:**
+passphrase strength remains a user decision; browser memory cannot guarantee
+erasure of every intermediate copy.
 
 ### T3 — Malicious GIF / packet input (HIGH likelihood, MEDIUM impact)
 Crafted input aims to exhaust memory/CPU or corrupt state.

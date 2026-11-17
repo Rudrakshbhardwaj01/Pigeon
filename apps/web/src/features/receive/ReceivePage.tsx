@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CameraOff, Download, FileImage, RefreshCw } from "lucide-react";
+import { Camera, CameraOff, Download, FileImage, KeyRound, RefreshCw } from "lucide-react";
 
 import { Dropzone } from "../../components/Dropzone";
 import { ErrorDisplay } from "../../components/ErrorDisplay";
@@ -22,6 +22,8 @@ interface DecodeProgressState {
   filename: string | null;
   mimeType: string | null;
   originalSize: number | null;
+  encrypted: boolean;
+  failedDecryptions: number;
 }
 
 export interface ReceiveResult {
@@ -42,6 +44,8 @@ const emptyProgress: DecodeProgressState = {
   filename: null,
   mimeType: null,
   originalSize: null,
+  encrypted: false,
+  failedDecryptions: 0,
 };
 
 export function ReceivePage() {
@@ -111,6 +115,7 @@ function useReceiverStatus() {
   const [incomplete, setIncomplete] = useState<DecodeProgressState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [awaitingPassphrase, setAwaitingPassphrase] = useState<DecodeProgressState | null>(null);
   // The useState setters are stable across renders. Callbacks that run inside
   // effects (e.g. feedPacket) must depend on those setters directly — never on
   // this state bag, whose identity changes on every progress update.
@@ -120,11 +125,81 @@ function useReceiverStatus() {
     incomplete, setIncomplete,
     error, setError,
     busy, setBusy,
+    awaitingPassphrase, setAwaitingPassphrase,
   };
+}
+
+/** Submitting the passphrase unlocks paused transfers (Rust-side outcome). */
+interface PassphraseRpcResult {
+  outcome: { unlocked: number; rejected: number };
+  active: TransferStatus | null;
+}
+
+/**
+ * Passphrase gate for encrypted transfers. Shown when the engine reports
+ * `awaiting-passphrase`: the metadata envelope is understood, but nothing
+ * (including the filename) can be read until a passphrase decrypts it.
+ */
+function PassphrasePanel({
+  onSubmit,
+  busy,
+  rejected,
+}: {
+  onSubmit: (passphrase: string) => void;
+  busy: boolean;
+  rejected: boolean;
+}) {
+  const [value, setValue] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+  return (
+    <div className="card passphrase-card" role="status">
+      <div className="passphrase-head">
+        <KeyRound size={18} strokeWidth={1.6} />
+        <div>
+          <div className="notice-title">This transfer is encrypted</div>
+          <div className="notice-detail">
+            Enter the passphrase the sender gave you — it travels separately from
+            the GIF. The filename and contents stay hidden until the passphrase
+            decrypts the transfer.
+          </div>
+        </div>
+      </div>
+      <form
+        ref={formRef}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (value.length > 0 && !busy) {
+            onSubmit(value);
+          }
+        }}
+        className="passphrase-form"
+      >
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Transfer passphrase"
+          autoComplete="off"
+          disabled={busy}
+          aria-label="Transfer passphrase"
+        />
+        <button className="btn primary" type="submit" disabled={busy || value.length === 0}>
+          Decrypt
+        </button>
+      </form>
+      {rejected ? (
+        <p className="hint passphrase-hint warn" role="alert">
+          That passphrase did not decrypt the transfer. Check for typos, or the
+          GIF may be corrupted.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
   const state = useReceiverStatus();
+  const [rejectedAttempt, setRejectedAttempt] = useState(false);
 
   const cancel = useCallback(() => {
     // Fire-and-forget: the in-flight import loop checks the flag between frames.
@@ -141,6 +216,8 @@ function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
       state.setError(null);
       state.setResult(null);
       state.setIncomplete(null);
+      state.setAwaitingPassphrase(null);
+      setRejectedAttempt(false);
       state.setProgress({ ...emptyProgress });
       try {
         const data = await file.arrayBuffer();
@@ -155,6 +232,14 @@ function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
         );
         if (res.file) {
           state.setResult({ file: res.file });
+        } else if (res.status.encrypted && res.status.phase === "awaiting-passphrase") {
+          // Encrypted transfer paused at the passphrase gate.
+          state.setProgress(null);
+          state.setAwaitingPassphrase({
+            ...emptyProgress,
+            phase: "done",
+            encrypted: true,
+          });
         } else {
           // Not enough frames captured — report honestly, never fabricate.
           const s = res.status;
@@ -167,6 +252,8 @@ function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
             progress: s.progress,
             filename: s.filename,
             originalSize: s.originalSize,
+            encrypted: s.encrypted,
+            failedDecryptions: s.failedDecryptions,
           });
         }
       } catch (err) {
@@ -177,6 +264,53 @@ function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
         } else {
           state.setError(message);
         }
+      } finally {
+        state.setBusy(false);
+      }
+    },
+    [decodeRef, state]
+  );
+
+  const submitPassphrase = useCallback(
+    async (passphrase: string) => {
+      const client = decodeRef.current;
+      if (!client) {
+        return;
+      }
+      state.setBusy(true);
+      try {
+        const res = await client.call<PassphraseRpcResult>(
+          { kind: "set-passphrase", passphrase } as Omit<DecodeRequest, "id">
+        );
+        const status = res.active;
+        if (res.outcome.rejected > 0 || !status || status.phase === "awaiting-passphrase") {
+          setRejectedAttempt(true);
+          return;
+        }
+        setRejectedAttempt(false);
+        if (status.phase === "verified") {
+          const fileRes = await client.call<{ file: ReconstructedFile }>(
+            { kind: "take-file", transferId: status.transferId } as unknown as Omit<DecodeRequest, "id">
+          );
+          state.setAwaitingPassphrase(null);
+          state.setResult({ file: fileRes.file });
+          return;
+        }
+        // Unlocked but incomplete: show the honest shortfall.
+        state.setAwaitingPassphrase(null);
+        state.setIncomplete({
+          ...emptyProgress,
+          phase: "done",
+          uniqueSymbols: status.uniqueSymbols,
+          neededSymbols: status.neededSymbols,
+          progress: status.progress,
+          filename: status.filename,
+          originalSize: status.originalSize,
+          encrypted: status.encrypted,
+          failedDecryptions: status.failedDecryptions,
+        });
+      } catch (err) {
+        state.setError(err instanceof Error ? err.message : String(err));
       } finally {
         state.setBusy(false);
       }
@@ -203,6 +337,10 @@ function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
 
           {state.error ? <ErrorDisplay title="Could not recover the file" detail={state.error} /> : null}
 
+          {state.awaitingPassphrase ? (
+            <PassphrasePanel onSubmit={(pw) => void submitPassphrase(pw)} busy={state.busy} rejected={rejectedAttempt} />
+          ) : null}
+
           {state.incomplete ? <IncompletePanel status={state.incomplete} /> : null}
 
           {state.busy && state.progress ? (
@@ -217,7 +355,16 @@ function GifImport({ decodeRef }: { decodeRef: DecodeRef }) {
           ) : null}
         </>
       ) : (
-        <ResultPanel result={state.result} onReset={() => { state.setResult(null); state.setIncomplete(null); state.setProgress(null); }} />
+        <ResultPanel
+          result={state.result}
+          onReset={() => {
+            state.setResult(null);
+            state.setIncomplete(null);
+            state.setProgress(null);
+            state.setAwaitingPassphrase(null);
+            setRejectedAttempt(false);
+          }}
+        />
       )}
     </>
   );
@@ -235,6 +382,7 @@ function CameraScan({ decodeRef }: { decodeRef: DecodeRef }) {
   const [deviceId, setDeviceId] = useState<string>("");
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [rejectedAttempt, setRejectedAttempt] = useState(false);
 
   const stop = useCallback(() => {
     activeRef.current = false;
@@ -249,7 +397,7 @@ function CameraScan({ decodeRef }: { decodeRef: DecodeRef }) {
 
   // Destructured setters are stable; `feedPacket` keeps a stable identity so
   // the camera-worker effect below runs once, not on every progress render.
-  const { setProgress, setResult, setError, setIncomplete } = state;
+  const { setProgress, setResult, setError, setIncomplete, setAwaitingPassphrase } = state;
 
   const feedPacket = useCallback(
     (bytes: Uint8Array) => {
@@ -265,6 +413,12 @@ function CameraScan({ decodeRef }: { decodeRef: DecodeRef }) {
           const status = res.active ?? res.last?.status ?? null;
           if (status) {
             setIncomplete(null);
+            if (status.encrypted && status.phase === "awaiting-passphrase") {
+              // Pause scanning feedback; the passphrase panel takes over.
+              setAwaitingPassphrase({ ...emptyProgress, phase: "done", encrypted: true });
+              return;
+            }
+            setAwaitingPassphrase(null);
             setProgress((prev) => ({
               ...emptyProgress,
               phase: "collecting",
@@ -278,6 +432,8 @@ function CameraScan({ decodeRef }: { decodeRef: DecodeRef }) {
               filename: status.filename,
               mimeType: status.mimeType,
               originalSize: status.originalSize,
+              encrypted: status.encrypted,
+              failedDecryptions: status.failedDecryptions,
             }));
             if (status.phase === "verified") {
               // Stop the camera first: the transfer is complete, the light
@@ -301,7 +457,56 @@ function CameraScan({ decodeRef }: { decodeRef: DecodeRef }) {
           setError(err instanceof Error ? err.message : String(err));
         });
     },
-    [decodeRef, setProgress, setResult, setError, setIncomplete, stop]
+    [decodeRef, setProgress, setResult, setError, setIncomplete, setAwaitingPassphrase, stop]
+  );
+
+  const submitPassphrase = useCallback(
+    async (passphrase: string) => {
+      const client = decodeRef.current;
+      if (!client) {
+        return;
+      }
+      state.setBusy(true);
+      try {
+        const res = await client.call<PassphraseRpcResult>(
+          { kind: "set-passphrase", passphrase } as Omit<DecodeRequest, "id">
+        );
+        const status = res.active;
+        if (res.outcome.rejected > 0 || !status || status.phase === "awaiting-passphrase") {
+          setRejectedAttempt(true);
+          return;
+        }
+        setRejectedAttempt(false);
+        if (status.phase === "verified") {
+          setAwaitingPassphrase(null);
+          stop();
+          const fileRes = await client.call<{ file: ReconstructedFile }>(
+            { kind: "take-file", transferId: status.transferId } as unknown as Omit<DecodeRequest, "id">
+          );
+          state.setResult({ file: fileRes.file });
+          return;
+        }
+        // Unlocked but still collecting: resume the live progress view.
+        setAwaitingPassphrase(null);
+        setProgress({
+          ...emptyProgress,
+          phase: "collecting",
+          uniqueSymbols: status.uniqueSymbols,
+          neededSymbols: status.neededSymbols,
+          progress: status.progress,
+          filename: status.filename,
+          mimeType: status.mimeType,
+          originalSize: status.originalSize,
+          encrypted: status.encrypted,
+          failedDecryptions: status.failedDecryptions,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        state.setBusy(false);
+      }
+    },
+    [decodeRef, state, setAwaitingPassphrase, setProgress, setError, stop]
   );
 
   const scanLoop = useCallback(() => {
@@ -452,9 +657,13 @@ function CameraScan({ decodeRef }: { decodeRef: DecodeRef }) {
           onReset={() => {
             state.setResult(null);
             state.setProgress(null);
+            state.setAwaitingPassphrase(null);
+            setRejectedAttempt(false);
             void decodeRef.current?.call({ kind: "reset" } as Omit<DecodeRequest, "id">);
           }}
         />
+      ) : state.awaitingPassphrase ? (
+        <PassphrasePanel onSubmit={(pw) => void submitPassphrase(pw)} busy={state.busy} rejected={rejectedAttempt} />
       ) : state.progress ? (
         <ReceiveProgress progress={state.progress} live={scanning} />
       ) : null}
@@ -485,7 +694,17 @@ function ReceiveProgress({
         <Stat label="Valid packets" value={String(progress.validPackets)} mono />
         <Stat label="Invalid" value={String(progress.invalidPackets)} mono />
         <Stat label="Duplicates" value={String(progress.duplicatePackets)} mono />
+        {progress.encrypted ? <Stat label="Mode" value="Encrypted" /> : null}
+        {progress.failedDecryptions > 0 ? (
+          <Stat label="Rejected packets" value={String(progress.failedDecryptions)} mono />
+        ) : null}
       </div>
+      {progress.encrypted && progress.failedDecryptions > 0 ? (
+        <p className="hint passphrase-hint warn">
+          Packets are failing to decrypt — the passphrase may be wrong for this
+          transfer.
+        </p>
+      ) : null}
     </div>
   );
 }

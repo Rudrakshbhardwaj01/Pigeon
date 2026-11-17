@@ -103,16 +103,16 @@ impl GifFrameStream {
             match pending.dispose {
                 DisposalMethod::Background => {
                     for y in pending.top..(pending.top + pending.height).min(self.height) {
-                        let start = y as usize * self.width as usize * 4
-                            + pending.left as usize * 4;
+                        let start =
+                            y as usize * self.width as usize * 4 + pending.left as usize * 4;
                         let end = start + pending.width as usize * 4;
                         // Fill with white: QR content reads best on light canvas.
                         if self.has_global_background {
-                            for chunk in self.canvas[start..end].chunks_exact_mut(4) {
+                            for chunk in self.canvas[start..end].as_chunks_mut::<4>().0 {
                                 chunk.copy_from_slice(&[255, 255, 255, 255]);
                             }
                         } else {
-                            for chunk in self.canvas[start..end].chunks_exact_mut(4) {
+                            for chunk in self.canvas[start..end].as_chunks_mut::<4>().0 {
                                 chunk.copy_from_slice(&[0, 0, 0, 0]);
                             }
                         }
@@ -159,8 +159,7 @@ impl GifFrameStream {
                 break;
             }
             let src = &frame.buffer[row * fw as usize * 4..(row + 1) * fw as usize * 4];
-            let dst_start =
-                (cy * self.width as usize + fl as usize) * 4;
+            let dst_start = (cy * self.width as usize + fl as usize) * 4;
             let dst_end = dst_start + fw as usize * 4;
             if dst_end > self.canvas.len() {
                 return Err(PigeonError::GifFrameMalformed {
@@ -169,7 +168,7 @@ impl GifFrameStream {
                 });
             }
             let dst = &mut self.canvas[dst_start..dst_end];
-            for (px, chunk) in dst.chunks_exact_mut(4).enumerate() {
+            for (px, chunk) in dst.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let alpha = src[px * 4 + 3];
                 if alpha != 0 {
                     chunk.copy_from_slice(&src[px * 4..px * 4 + 4]);
@@ -237,7 +236,10 @@ mod tests {
             GifFrameStream::new(b"PNG blah blah"),
             Err(PigeonError::GifBadSignature)
         ));
-        assert!(matches!(GifFrameStream::new(b""), Err(PigeonError::GifBadSignature)));
+        assert!(matches!(
+            GifFrameStream::new(b""),
+            Err(PigeonError::GifBadSignature)
+        ));
     }
 
     #[test]

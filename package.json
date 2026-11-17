@@ -20,6 +20,7 @@
     "test:e2e": "npm run test:e2e --workspace @pigeon/web",
     "test:rust": "cargo test --workspace",
     "typecheck": "npm run typecheck --workspace @pigeon/web",
-    "lint": "npm run lint --workspace @pigeon/web"
+    "lint": "npm run lint --workspace @pigeon/web",
+    "screenshots": "node scripts/capture-screenshots.mjs"
   }
 }

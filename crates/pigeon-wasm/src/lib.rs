@@ -5,9 +5,10 @@
 
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroizing;
 
 use pigeon_core::decoder::{DecodeLimits, DecoderEngine, IngestReport, TransferStatus};
-use pigeon_core::encoder::{CompressionMode, EncodeConfig, QrEcl};
+use pigeon_core::encoder::{CompressionMode, EncodeConfig, EncryptionConfig, QrEcl};
 use pigeon_core::error::PigeonError;
 
 /// Deserialized encoding parameters from JavaScript (all optional except filename).
@@ -23,6 +24,14 @@ struct JsEncodeParams {
     frame_delay_ms: Option<u32>,
     max_file_size: Option<u64>,
     target_frame_px: Option<u32>,
+    /// When a non-empty passphrase is provided, the transfer is encrypted
+    /// (protocol v2): Argon2id key derivation + XChaCha20-Poly1305.
+    passphrase: Option<String>,
+    /// Optional Argon2id overrides (memory KiB, passes, lanes). Omitted
+    /// fields fall back to the engine defaults (OWASP recommendation).
+    kdf_mem_kib: Option<u32>,
+    kdf_passes: Option<u32>,
+    kdf_lanes: Option<u32>,
 }
 
 impl JsEncodeParams {
@@ -57,6 +66,24 @@ impl JsEncodeParams {
         if let Some(m) = self.max_file_size {
             cfg.max_file_size = m;
         }
+        if let Some(pw) = &self.passphrase {
+            if !pw.is_empty() {
+                cfg.encryption = Some(EncryptionConfig {
+                    passphrase: Zeroizing::new(pw.clone()),
+                    kdf: pigeon_core::crypto::KdfParams {
+                        mem_kib: self
+                            .kdf_mem_kib
+                            .unwrap_or(pigeon_core::crypto::kdf::KDF_DEFAULT_MEM_KIB),
+                        passes: self
+                            .kdf_passes
+                            .unwrap_or(pigeon_core::crypto::kdf::KDF_DEFAULT_PASSES),
+                        lanes: self
+                            .kdf_lanes
+                            .unwrap_or(pigeon_core::crypto::kdf::KDF_DEFAULT_LANES),
+                    },
+                });
+            }
+        }
         cfg.validated().map_err(map_err)
     }
 }
@@ -75,7 +102,9 @@ fn parse_transfer_id(hex: &str) -> Result<u64, JsError> {
 
 fn report_to_js(report: IngestReport) -> Result<JsValue, JsError> {
     let ser = serde_wasm_bindgen::Serializer::new();
-    report.serialize(&ser).map_err(|e| JsError::new(&e.to_string()))
+    report
+        .serialize(&ser)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// The wire protocol version this engine implements.
@@ -100,13 +129,35 @@ pub fn encode_gif(data: &[u8], params: JsValue) -> Result<JsValue, JsError> {
         pigeon_core::encoder::encode_gif_bytes(data, config, target_px).map_err(map_err)?;
 
     let ser = serde_wasm_bindgen::Serializer::new();
-    let stats_js = stats.serialize(&ser).map_err(|e| JsError::new(&e.to_string()))?;
+    let stats_js = stats
+        .serialize(&ser)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(&obj, &"gif".into(), &gif_bytes.into())
         .map_err(|_| JsError::new("failed to attach gif bytes"))?;
     js_sys::Reflect::set(&obj, &"stats".into(), &stats_js)
         .map_err(|_| JsError::new("failed to attach stats"))?;
     Ok(obj.into())
+}
+
+/// Pre-encode estimate for a file of `size_bytes` (no data needed, no
+/// fountain or rendering work): QR geometry, frame-count bounds at the
+/// configured redundancy, loop duration and a GIF size estimate.
+///
+/// Returns the same shape as the engine's `TransferEstimate` (camelCase).
+#[wasm_bindgen(js_name = estimateTransfer)]
+pub fn estimate_transfer(size_bytes: u64, params: JsValue) -> Result<JsValue, JsError> {
+    let js: JsEncodeParams = if params.is_undefined() {
+        JsEncodeParams::default()
+    } else {
+        serde_wasm_bindgen::from_value(params).map_err(|e| JsError::new(&e.to_string()))?
+    };
+    let config = js.to_config()?;
+    let estimate = pigeon_core::encoder::estimate_transfer(size_bytes, &config).map_err(map_err)?;
+    let ser = serde_wasm_bindgen::Serializer::new();
+    estimate
+        .serialize(&ser)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Prepares a transfer: wire packets are encoded up front, QR matrices are
@@ -151,7 +202,12 @@ pub struct GifBuilder {
 #[wasm_bindgen]
 impl GifBuilder {
     #[wasm_bindgen(constructor)]
-    pub fn new(first_modules: &[u8], first_size: usize, scale: u16, delay_ms: u32) -> Result<GifBuilder, JsError> {
+    pub fn new(
+        first_modules: &[u8],
+        first_size: usize,
+        scale: u16,
+        delay_ms: u32,
+    ) -> Result<GifBuilder, JsError> {
         let matrix = pigeon_core::encoder::QrMatrix {
             size: first_size,
             modules: first_modules.to_vec(),
@@ -232,7 +288,9 @@ impl QrFrameSession {
             None => Ok(JsValue::NULL),
             Some(matrix) => {
                 let ser = serde_wasm_bindgen::Serializer::new();
-                matrix.serialize(&ser).map_err(|e| JsError::new(&e.to_string()))
+                matrix
+                    .serialize(&ser)
+                    .map_err(|e| JsError::new(&e.to_string()))
             }
         }
     }
@@ -252,7 +310,8 @@ impl Receiver {
     pub fn new(max_transfer_bytes: Option<JsValue>) -> Self {
         // JS callers pass a Number; values above 2^53 are out of scope for
         // the soft limit and the engine cap applies anyway.
-        let max_bytes: Option<u64> = max_transfer_bytes.map(|v| v.as_f64().map(|f| f as u64)).flatten();
+        let max_bytes: Option<u64> = max_transfer_bytes
+            .and_then(|v| v.as_f64().map(|f| f as u64));
         let limits = DecodeLimits {
             max_transfer_bytes: max_bytes
                 .unwrap_or(pigeon_core::protocol::MAX_DECODE_TRANSFER_BYTES),
@@ -277,7 +336,9 @@ impl Receiver {
         let ser = serde_wasm_bindgen::Serializer::new();
         let id = parse_transfer_id(transfer_id)?;
         match self.inner.status(id) {
-            Some(status) => status.serialize(&ser).map_err(|e| JsError::new(&e.to_string())),
+            Some(status) => status
+                .serialize(&ser)
+                .map_err(|e| JsError::new(&e.to_string())),
             None => Ok(JsValue::NULL),
         }
     }
@@ -287,7 +348,9 @@ impl Receiver {
     pub fn active_status(&self) -> Result<JsValue, JsError> {
         let ser = serde_wasm_bindgen::Serializer::new();
         match self.inner.active_status() {
-            Some(status) => status.serialize(&ser).map_err(|e| JsError::new(&e.to_string())),
+            Some(status) => status
+                .serialize(&ser)
+                .map_err(|e| JsError::new(&e.to_string())),
             None => Ok(JsValue::NULL),
         }
     }
@@ -297,7 +360,9 @@ impl Receiver {
     pub fn all_statuses(&self) -> Result<JsValue, JsError> {
         let ser = serde_wasm_bindgen::Serializer::new();
         let statuses: Vec<TransferStatus> = self.inner.all_statuses();
-        statuses.serialize(&ser).map_err(|e| JsError::new(&e.to_string()))
+        statuses
+            .serialize(&ser)
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Aggregate counters.
@@ -318,7 +383,9 @@ impl Receiver {
         let ser = serde_wasm_bindgen::Serializer::new();
         let id = parse_transfer_id(transfer_id)?;
         match self.inner.take_file(id).map_err(map_err)? {
-            Some(file) => file.serialize(&ser).map_err(|e| JsError::new(&e.to_string())),
+            Some(file) => file
+                .serialize(&ser)
+                .map_err(|e| JsError::new(&e.to_string())),
             None => Ok(JsValue::NULL),
         }
     }
@@ -326,6 +393,22 @@ impl Receiver {
     /// Clears all receive state.
     pub fn reset(&mut self) {
         self.inner.reset();
+    }
+
+    /// Provides the passphrase for encrypted transfers.
+    ///
+    /// Unlocks every transfer currently paused at the passphrase gate and is
+    /// remembered for transfers whose metadata has not arrived yet. Returns
+    /// `{ unlocked, rejected }`: `rejected` counts transfers whose
+    /// decryption failed with this passphrase (wrong passphrase for their
+    /// salt); those transfers stay paused and may be retried.
+    #[wasm_bindgen(js_name = setPassphrase)]
+    pub fn set_passphrase(&mut self, passphrase: &str) -> Result<JsValue, JsError> {
+        let ser = serde_wasm_bindgen::Serializer::new();
+        let outcome = self.inner.set_passphrase(passphrase).map_err(map_err)?;
+        outcome
+            .serialize(&ser)
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 }
 
@@ -358,7 +441,9 @@ impl GifFrameStream {
         let ser = serde_wasm_bindgen::Serializer::new();
         match self.inner.next_frame().map_err(map_err)? {
             None => Ok(JsValue::NULL),
-            Some(frame) => frame.serialize(&ser).map_err(|e| JsError::new(&e.to_string())),
+            Some(frame) => frame
+                .serialize(&ser)
+                .map_err(|e| JsError::new(&e.to_string())),
         }
     }
 }

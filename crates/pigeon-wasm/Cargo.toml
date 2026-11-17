@@ -15,6 +15,7 @@ js-sys.workspace = true
 serde.workspace = true
 serde-wasm-bindgen.workspace = true
 getrandom = { workspace = true, features = ["js"] }
+zeroize.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

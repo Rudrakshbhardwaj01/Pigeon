@@ -57,7 +57,11 @@ pub fn render_frame(matrix: &QrMatrix, scale: u16, out: &mut Vec<u8>) -> (u16, u
 ///
 /// Frames share the global two-colour palette; `delay_ms` is converted to GIF
 /// centiseconds (minimum 20 ms).
-pub fn encode_gif(matrices: &[QrMatrix], scale: u16, delay_ms: u32) -> Result<Vec<u8>, PigeonError> {
+pub fn encode_gif(
+    matrices: &[QrMatrix],
+    scale: u16,
+    delay_ms: u32,
+) -> Result<Vec<u8>, PigeonError> {
     if matrices.is_empty() {
         return Err(PigeonError::InvalidConfig("no frames to encode".into()));
     }
@@ -70,7 +74,9 @@ pub fn encode_gif(matrices: &[QrMatrix], scale: u16, delay_ms: u32) -> Result<Ve
 
     let mut bitmap: Vec<u8> = Vec::new();
     let (w, h) = render_frame(&matrices[0], scale, &mut bitmap);
-    if u32::from(w) > crate::protocol::MAX_GIF_DIMENSION || u32::from(h) > crate::protocol::MAX_GIF_DIMENSION {
+    if u32::from(w) > crate::protocol::MAX_GIF_DIMENSION
+        || u32::from(h) > crate::protocol::MAX_GIF_DIMENSION
+    {
         return Err(PigeonError::GifDimensionsTooLarge(
             w,
             h,
@@ -227,7 +233,13 @@ impl GifBuilder {
             .encoder
             .as_mut()
             .ok_or_else(|| PigeonError::GifEncodeFailed("builder already finished".into()))?;
-        write_matrix_frame(encoder, &self.bitmap, self.width, self.height, self.delay_cs)?;
+        write_matrix_frame(
+            encoder,
+            &self.bitmap,
+            self.width,
+            self.height,
+            self.delay_cs,
+        )?;
         self.frames_written += 1;
         Ok(())
     }
@@ -297,7 +309,7 @@ mod tests {
         // corners are quiet-zone white (index 0)
         assert_eq!(buf[0], 0);
         // center region has black pixels
-        assert!(buf.iter().any(|&v| v == 1));
+        assert!(buf.contains(&1));
     }
 
     #[test]
@@ -309,7 +321,7 @@ mod tests {
         let mut dec = gif::DecodeOptions::new();
         dec.set_color_output(gif::ColorOutput::RGBA);
         let mut decoder = dec.read_info(Cursor::new(&bytes[..])).expect("parses back");
-        let (w, h) = (decoder.width(), decoder.height());
+        let (w, _h) = (decoder.width(), decoder.height());
         assert_eq!(w, (21 + 8) * 4);
         let mut frames = 0;
         while let Some(frame) = decoder.read_next_frame().expect("frame") {

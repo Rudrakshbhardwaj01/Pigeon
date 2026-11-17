@@ -1,0 +1,5 @@
+# Pinned toolchain for reproducible builds (CI uses the same file).
+# Bump deliberately; wasm-pack builds and rustfmt/clippy versions track it.
+[toolchain]
+channel = "1.99.1"
+profile = "default"

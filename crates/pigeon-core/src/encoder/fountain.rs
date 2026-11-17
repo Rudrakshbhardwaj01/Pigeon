@@ -5,7 +5,7 @@
 //! interleaved round-robin so a partially captured transfer spreads loss
 //! evenly across blocks, plus a configurable number of repair symbols.
 
-use raptorq::{EncodingPacket, Encoder, ObjectTransmissionInformation};
+use raptorq::{Encoder, EncodingPacket, ObjectTransmissionInformation};
 
 /// Wraps a single object for fountain encoding.
 pub struct FountainEncoder {
@@ -115,7 +115,10 @@ impl FountainEncoder {
             })
             .collect();
 
-        let mut packets = Vec::with_capacity(self.total_source_symbols + repair_per_block.iter().sum::<usize>() * block_encoders.len());
+        let mut packets = Vec::with_capacity(
+            self.total_source_symbols
+                + repair_per_block.iter().sum::<usize>() * block_encoders.len(),
+        );
         let max_source = self.block_symbol_counts.iter().copied().max().unwrap_or(0);
         let max_repair = repair_per_block.iter().copied().max().unwrap_or(0);
         for i in 0..max_source.max(max_repair) {
@@ -154,7 +157,12 @@ mod tests {
         assert_eq!(all_unique(&seq), seq.len(), "no duplicate payload ids");
 
         // drop 25% of frames (simulate missed QR frames)
-        let kept: Vec<&EncodingPacket> = seq.iter().enumerate().filter(|(i, _)| i % 4 != 0).map(|(_, p)| p).collect();
+        let kept: Vec<&EncodingPacket> = seq
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % 4 != 0)
+            .map(|(_, p)| p)
+            .collect();
         let mut dec = Decoder::new(ObjectTransmissionInformation::deserialize(&enc.oti()));
         let mut result = None;
         for pkt in kept {
@@ -187,7 +195,9 @@ mod tests {
         // deterministic shuffle
         let mut seed = 0x1234_5678u64;
         for i in (1..seq.len()).rev() {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let j = (seed >> 33) as usize % (i + 1);
             seq.swap(i, j);
         }

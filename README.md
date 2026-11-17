@@ -8,15 +8,18 @@
 
 Pigeon turns a file into an animated QR-code GIF that travels through any
 ordinary file-sharing channel — and is reconstructed **byte-for-byte** on
-another device. No network. No server. No account. No pairing.
+another device. No network. No server. No account. No pairing. Optional
+passphrase encryption protects the whole transfer.
 
 [**⭐ Star this repository**](https://github.com/Rudrakshbhardwaj01/Pigeon) ·
-[Report an issue](https://github.com/Rudrakshbhardwaj01/Pigeon/issues)
+[Report an issue](https://github.com/Rudrakshbhardwaj01/Pigeon/issues) ·
+[Security policy](SECURITY.md)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)
 ![Rust](https://img.shields.io/badge/core-Rust-DEA584)
 ![Offline](https://img.shields.io/badge/offline-first-success)
+![CI](https://img.shields.io/badge/CI-GitHub_Actions-informational)
 
 </div>
 
@@ -57,8 +60,8 @@ installing an app or joining a network is not an option.
 ```mermaid
 flowchart LR
     subgraph Sender
-        A[File] --> B["Rust core: compress + fragment + RaptorQ fountain encode"]
-        B --> C["Wire packets (20-byte header + CRC32C)"]
+        A[File] --> B["Rust core: compress + (optional Argon2id/XChaCha20 seal) + RaptorQ fountain encode"]
+        B --> C["Wire packets (header + CRC32C, sealed envelopes when encrypted)"]
         C --> D[QR frames via fast_qr]
         D --> E[Animated GIF, two-colour palette]
     end
@@ -66,8 +69,8 @@ flowchart LR
     subgraph Receiver
         F --> G["Streaming GIF parse or camera frames"]
         G --> H[QR decode via ZXing WASM]
-        H --> I["Rust core: validate + dedupe + RaptorQ decode"]
-        I --> J[SHA-256 verify]
+        H --> I["Rust core: validate + authenticate + dedupe + RaptorQ decode"]
+        I --> J[Object open + SHA-256 verify]
         J --> K[File download, byte-for-byte]
     end
 ```
@@ -79,20 +82,35 @@ Two independent layers of redundancy protect the transfer:
   frames*: any sufficient subset of unique packets rebuilds the file, in any
   order, with duplicates ignored.
 
+Optional encryption adds two independent layers of protection on top:
+
+- **Per packet** — every payload is sealed with XChaCha20-Poly1305 and
+  authenticated against its transfer identity, the moment it is received.
+- **The whole object** — the file itself is sealed before fountain coding,
+  so nothing (not even the filename) is readable without the passphrase.
+
 ## Features
 
 Implemented and verified by automated tests (native Rust + real-browser E2E):
 
 - **File → GIF → file** roundtrip, byte-exact, SHA-256 verified.
+- **Optional passphrase encryption** (protocol v2): Argon2id + XChaCha20-Poly1305
+  protects file contents, filename and metadata; packets authenticate on
+  arrival and are bound to their transfer; wrong passphrases retry without
+  losing progress. Unencrypted transfers stay byte-compatible with older
+  receivers.
 - **GIF import** (streaming parse, bounded memory) and **camera receiving**
   (live scanning, frames in any order).
 - **RaptorQ forward error correction** with user-selectable redundancy
-  (10–100 % overhead).
+  (10–100 % overhead) and one-click **transfer presets** (Balanced, Maximum
+  reliability, Faster transmission, Camera-friendly).
+- **Pre-encode estimates**: frame count, GIF size and loop duration shown
+  before encoding, with stated assumptions.
 - **Optional zlib compression** with an auto heuristic that skips
   already-compressed media; decompression is hard-bounded.
 - **Self-describing transfers**: metadata packet (filename, size, MIME,
   SHA-256, FEC parameters) re-emitted every 500 frames so late joins learn
-  the parameters.
+  the parameters — sealed inside the envelope when encrypted.
 - **Multi-transfer isolation**: random 64-bit transfer ids; transfers never
   mix, duplicates and corruption are counted, not fatal.
 - **Fully offline PWA**: the app shell, Rust/WASM engine and QR decoder are
@@ -104,9 +122,10 @@ Implemented and verified by automated tests (native Rust + real-browser E2E):
   incomplete-transfer reports, terminal integrity failures — no partial or
   "probably fine" files.
 
-Not implemented (by design or yet): encryption/authentication of transfers
-(the GIF is plaintext), a receiver→sender feedback channel, and native
-mobile shells. See the [roadmap](#roadmap).
+Not implemented (by design or yet): public-key encryption and sender
+signatures (passphrase possession authenticates knowledge, not identity), a
+receiver→sender feedback channel, multi-file bundles, and native mobile
+shells. See the [roadmap](#roadmap).
 
 ## Screenshots
 
@@ -116,11 +135,12 @@ mobile shells. See the [roadmap](#roadmap).
 
 *More views: [docs/img](docs/img).*
 
-## Architecture
+## ## Architecture
 
 Rust owns correctness. The entire engine — protocol framing, CRC32C,
 metadata + filename sanitization, RaptorQ FEC, QR generation, GIF
-encode/parse, compression, SHA-256 verification and the multi-transfer
+encode/parse, compression, authenticated encryption (Argon2id +
+XChaCha20-Poly1305), SHA-256 verification and the multi-transfer
 recovery state machine — lives in
 [`crates/pigeon-core`](crates/pigeon-core/src), is compiled to WebAssembly
 by [`crates/pigeon-wasm`](crates/pigeon-wasm/src/lib.rs), and runs inside
@@ -181,23 +201,31 @@ npm run build:wasm
 
 **Send**
 
-1. Drop any file into the Send section (or click to browse).
-2. Choose redundancy, frame rate and compression — defaults are sensible.
-3. *Encode to GIF* → *Download GIF*. The stats panel shows frame count,
-   redundancy, QR version/ECL, loop duration and the SHA-256.
+1. Drop any file into the Send section (or click to browse). An estimate of
+   frames, GIF size and loop duration appears immediately.
+2. Pick a preset — or tune redundancy, frame rate and compression manually.
+3. Optionally turn on **encryption** and set a passphrase (twice; there is
+   no recovery without it).
+4. *Encode to GIF* → *Download GIF*. The stats panel shows frame count,
+   redundancy, encryption mode, QR version/ECL, loop duration and the
+   SHA-256.
 
 **Transport**
 
 Send the GIF as a **document / file attachment** (WhatsApp document,
 Telegram file, e-mail, Drive, USB). Platforms that re-encode media as video
 damage frames; the built-in redundancy tolerates some loss, but an untouched
-file is always safest.
+file is always safest. If the transfer is encrypted, share the passphrase
+over a **different channel** than the GIF — never inside it.
 
 **Receive**
 
 - *Import a GIF*: drop the GIF into the Receive section. Frames are decoded
   locally, one at a time. Reconstruction and SHA-256 verification are
   automatic; the download appears only when verification succeeds.
+- *Encrypted transfers* pause at a passphrase gate — nothing (not even the
+  filename) is readable until you enter it. A wrong passphrase can be
+  retried; nothing is lost.
 - *Scan with camera*: point the receiving camera at a screen playing a
   Pigeon GIF (open the GIF in any image viewer and let it loop). Frames
   arrive in any order; progress shows unique/required packets. Requires
@@ -220,14 +248,24 @@ file is always safest.
   app makes **no** remote requests at runtime, even offline assets come from
   the local cache.
 - CRC32C detects corruption; SHA-256 establishes content identity. **Neither
-  authenticates the sender, and Pigeon does not encrypt** — anyone holding
-  the GIF holds the file. Treat the GIF as the secret itself.
+  authenticates the sender** — verify the SHA-256 out-of-band (e.g. read it
+  over a call) when substitution is a concern.
+- **Unencrypted transfers are plaintext**: anyone holding the GIF holds the
+  file. Treat the GIF as the secret itself, or turn on encryption.
+- **Encrypted transfers** (optional, protocol v2) use Argon2id + XChaCha20-Poly1305
+  with the transfer identity as authenticated associated data. The file,
+  filename, size and checksum all sit inside the envelope. Documented
+  leakage: timing, volume, transfer id and KDF parameters. Encryption proves
+  *knowledge of the passphrase*, not the sender's identity.
 - All imported GIFs and packets are treated as hostile input: signature and
   dimension checks, streaming parse, packet CRC and length limits, bounded
-  decompression, filename sanitization, unknown-version rejection.
+  decompression, filename sanitization, unknown-version rejection, KDF
+  parameter caps, authentication before any plaintext use.
 
-Read the honest details: [`docs/SECURITY.md`](docs/SECURITY.md) and
-[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+Read the honest details: [`docs/SECURITY.md`](docs/SECURITY.md),
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) and the wire spec
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md). Vulnerabilities: see
+[`SECURITY.md`](SECURITY.md) for private reporting.
 
 ## Browser compatibility
 
@@ -247,7 +285,7 @@ in this delivery.
 ```sh
 npm run test:rust    # Rust unit + native optical roundtrip suites
 npm run test:web     # Vitest unit/component tests
-npm run test:e2e     # Playwright: real-browser roundtrips incl. offline
+npm run test:e2e     # Playwright: real-browser roundtrips incl. offline + encryption
 npm run typecheck    # tsc -b
 npm run lint         # eslint
 
@@ -257,19 +295,20 @@ cargo test -p pigeon-core --release --test bench -- --ignored --nocapture
 
 The end-to-end suite exercises the complete pipeline in a real browser —
 file → GIF → download → import → verified reconstruction → byte comparison —
-plus offline operation, incomplete-transfer reporting and invalid-input
-handling. Project structure:
+plus offline operation, incomplete-transfer reporting, invalid-input
+handling and the encrypted roundtrip (wrong passphrase rejected, correct
+passphrase byte-exact). Project structure:
 
 ```text
-crates/pigeon-core/      Rust engine (protocol, FEC, QR, GIF, recovery)
+crates/pigeon-core/      Rust engine (protocol, crypto, FEC, QR, GIF, recovery)
 crates/pigeon-wasm/      wasm-bindgen API surface
 apps/web/                React app, workers, service worker, tests
 docs/                    protocol, architecture, security, threat model…
 tests/fixtures/          shared E2E fixtures
 ```
 
-Contributions are welcome — please open an issue or pull request on
-[GitHub](https://github.com/Rudrakshbhardwaj01/Pigeon).
+Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+workflow, and [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
 ## Troubleshooting
 
@@ -304,9 +343,14 @@ Dependency licenses: [`apps/web/THIRD_PARTY_LICENSES.md`](apps/web/THIRD_PARTY_L
 ## Roadmap
 
 1. Physical-device camera testing and tuning (Android Chrome, iOS Safari).
-2. Optional authenticated encryption via the reserved protocol flag space.
-3. Native shells reusing the environment-neutral Rust core (FFI).
-4. Optional, explicit receiver feedback channel.
+2. Public-key encryption and signed manifests (local cryptographic
+   identities, key fingerprints) building on the v2 envelope.
+3. Multi-file bundles with a documented manifest (paths, per-file hashes,
+   safe extraction).
+4. CLI and Rust SDK on the environment-neutral core (`encode`, `decode`,
+   `inspect`).
+5. Native shells reusing the environment-neutral Rust core (FFI).
+6. Optional, explicit receiver feedback channel.
 
 ---
 

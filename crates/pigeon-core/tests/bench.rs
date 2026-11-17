@@ -12,9 +12,9 @@
 use std::time::Instant;
 
 use pigeon_core::decoder::gif::GifFrameStream;
-use pigeon_core::decoder::{DecoderEngine, DecodeLimits};
-use pigeon_core::encoder::gif::{encode_gif, QUIET_MODULES};
+use pigeon_core::decoder::{DecodeLimits, DecoderEngine};
 use pigeon_core::encoder::encode_qr_matrices;
+use pigeon_core::encoder::gif::{encode_gif, QUIET_MODULES};
 use pigeon_core::encoder::{encode_file, CompressionMode, EncodeConfig};
 use pigeon_core::integrity::sha256_hex;
 
@@ -76,11 +76,28 @@ fn bench_encode_pipeline_1mb() {
     let gif = encode_gif(&matrices, scale, transfer.stats.frame_delay_ms).expect("gif");
     let gif_ms = t2.elapsed().as_millis();
 
-    println!("== encode 1 MiB (incompressible, overhead 30%, V{}-{}) ==", transfer.stats.qr_version, transfer.stats.qr_ecl);
-    println!("  fountain encode : {fountain_ms} ms ({} frames)", transfer.stats.total_frames);
-    println!("  QR generation   : {qr_ms} ms ({:.1} frames/ms)", transfer.stats.total_frames as f64 / qr_ms as f64);
-    println!("  GIF assembly    : {gif_ms} ms ({}x{} px frames)", matrices[0].size + 2 * QUIET_MODULES, matrices[0].size + 2 * QUIET_MODULES);
-    println!("  GIF size        : {} KiB ({:.2} KiB/frame)", gif.len() / 1024, gif.len() as f64 / 1024.0 / transfer.stats.total_frames as f64);
+    println!(
+        "== encode 1 MiB (incompressible, overhead 30%, V{}-{}) ==",
+        transfer.stats.qr_version, transfer.stats.qr_ecl
+    );
+    println!(
+        "  fountain encode : {fountain_ms} ms ({} frames)",
+        transfer.stats.total_frames
+    );
+    println!(
+        "  QR generation   : {qr_ms} ms ({:.1} frames/ms)",
+        transfer.stats.total_frames as f64 / qr_ms as f64
+    );
+    println!(
+        "  GIF assembly    : {gif_ms} ms ({}x{} px frames)",
+        matrices[0].size + 2 * QUIET_MODULES,
+        matrices[0].size + 2 * QUIET_MODULES
+    );
+    println!(
+        "  GIF size        : {} KiB ({:.2} KiB/frame)",
+        gif.len() / 1024,
+        gif.len() as f64 / 1024.0 / transfer.stats.total_frames as f64
+    );
 }
 
 #[test]
@@ -109,7 +126,9 @@ fn bench_decode_pipeline_1mb() {
         if seen % 5 == 0 {
             continue; // 20% frame loss
         }
-        if let Some(bytes) = decode_qr_rgba(&frame.data, frame.width as usize, frame.height as usize) {
+        if let Some(bytes) =
+            decode_qr_rgba(&frame.data, frame.width as usize, frame.height as usize)
+        {
             decoded += 1;
             engine.ingest_packet(&bytes).expect("ingest");
         }
@@ -117,11 +136,20 @@ fn bench_decode_pipeline_1mb() {
     let elapsed = t.elapsed().as_millis();
     println!("== decode 1 MiB transfer (20% frame loss) ==");
     println!("  frames parsed+QR-decoded : {seen} parsed, {decoded} decoded in {elapsed} ms");
-    println!("  throughput               : {:.1} frames/ms", seen as f64 / elapsed as f64);
-    println!("  effective data rate      : {:.0} KiB/s at 4 fps capture", data.len() as f64 / 1024.0 / (seen as f64 * 0.25));
+    println!(
+        "  throughput               : {:.1} frames/ms",
+        seen as f64 / elapsed as f64
+    );
+    println!(
+        "  effective data rate      : {:.0} KiB/s at 4 fps capture",
+        data.len() as f64 / 1024.0 / (seen as f64 * 0.25)
+    );
     let status = engine.active_status().expect("tracked");
     assert_eq!(status.phase, "verified");
-    println!("  reconstruction           : verified, sha256 {}", &sha256_hex(&data)[0..8]);
+    println!(
+        "  reconstruction           : verified, sha256 {}",
+        &sha256_hex(&data)[0..8]
+    );
 }
 
 #[test]
@@ -136,12 +164,18 @@ fn bench_qr_capacity_table() {
     println!();
     print!("  ECL L  : ");
     for v in [10u8, 15, 20, 21, 23, 25, 26, 29, 33, 40] {
-        print!("{:>4} ", probe_byte_capacity(version_from_u8(v).unwrap(), QrEcl::L));
+        print!(
+            "{:>4} ",
+            probe_byte_capacity(version_from_u8(v).unwrap(), QrEcl::L)
+        );
     }
     println!();
     print!("  ECL M  : ");
     for v in [10u8, 15, 20, 21, 23, 25, 26, 29, 33, 40] {
-        print!("{:>4} ", probe_byte_capacity(version_from_u8(v).unwrap(), QrEcl::M));
+        print!(
+            "{:>4} ",
+            probe_byte_capacity(version_from_u8(v).unwrap(), QrEcl::M)
+        );
     }
     println!();
 }

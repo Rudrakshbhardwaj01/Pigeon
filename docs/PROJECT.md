@@ -23,12 +23,19 @@ without infrastructure.
   import on the receiving device.
 - Camera receiving: point the camera at a screen playing a Pigeon GIF and
   collect fountain packets in real time, in any order.
-- Versioned binary wire protocol (v1) with CRC32C packet integrity, random
-  64-bit transfer ids, self-contained metadata packets, and periodic
-  metadata re-emission for late joiners.
+- Versioned binary wire protocol (v1 plaintext, v2 encrypted) with CRC32C
+  packet integrity, random 64-bit transfer ids, self-contained metadata
+  packets, and periodic metadata re-emission for late joiners.
+- Optional passphrase encryption (protocol v2): Argon2id + XChaCha20-Poly1305
+  over the whole object and every packet, with metadata protection, KDF
+  parameter caps, retryable wrong-passphrase handling, and full byte
+  compatibility for unencrypted v1 transfers.
 - RaptorQ (RFC 6330) fountain coding with configurable redundancy (0–200%);
   any sufficient subset of unique packets reconstructs the file in any
   order; duplicates and losses tolerated.
+- Transfer presets (Balanced, Maximum reliability, Faster transmission,
+  Camera-friendly) and a pre-encode estimator (frames, GIF size, loop
+  duration) computed by the engine with stated assumptions.
 - Optional zlib compression with an auto heuristic (skips already-compressed
   formats) and strict decompression bounds.
 - GIF import pipeline: streaming parse, per-frame QR decode, honest partial
@@ -37,13 +44,17 @@ without infrastructure.
   remote origins, self-hosted WASM, workers for all heavy processing.
 - Progressive, accessible UI (keyboard navigation, focus states, honest
   progress semantics, reduced-motion support).
+- CI (rustfmt, clippy, Rust tests, wasm compile check, tsc, eslint, Vitest,
+  Playwright incl. offline + encryption) and open-source infrastructure
+  (CHANGELOG, CONTRIBUTING, SECURITY policy, issue templates).
 
 ### Explicit non-goals (by design)
 
-- No encryption/authentication (protocol reserves space for a future
-  additive scheme) — the GIF is plaintext; treat it as the secret itself.
 - No backend, accounts, database, telemetry, or feedback channel from
   receiver to sender.
+- No public-key infrastructure yet: encryption is passphrase-based;
+  possession of the passphrase authenticates knowledge, not identity
+  (documented; public-key + signatures are on the roadmap).
 - No bulk-data ambitions: optical throughput is ~3–8 KiB/s; GIF containers
   cost ~24 KiB/frame. Pigeon targets secrets and small documents.
 
@@ -60,7 +71,8 @@ without infrastructure.
 
 - **Rust core** (`pigeon-core`): `raptorq` (RFC 6330 FEC), `fast_qr`
   (QR encode), `gif` (GIF encode/parse), `crc32c`, `sha2`, `flate2`,
-  `getrandom`, `thiserror`, `serde`.
+  `getrandom`, `argon2` (Argon2id KDF), `chacha20poly1305`
+  (XChaCha20-Poly1305 AEAD), `zeroize`, `thiserror`, `serde`.
 - **WASM bindings** (`pigeon-wasm`): `wasm-bindgen`, `serde-wasm-bindgen`,
   built with `wasm-pack` (web target).
 - **Frontend**: React 19, TypeScript (strict), Vite, `zxing-wasm` (QR decode,

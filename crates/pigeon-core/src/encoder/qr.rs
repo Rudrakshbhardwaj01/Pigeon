@@ -1,6 +1,6 @@
 //! QR-code generation from wire packets, with exact byte-capacity probing.
 
-use fast_qr::{ECL, QRBuilder, Version};
+use fast_qr::{QRBuilder, Version, ECL};
 
 use crate::error::PigeonError;
 
@@ -97,7 +97,7 @@ pub fn smallest_version_for(min_payload: usize, ecl: QrEcl) -> Option<Version> {
 
 /// Converts a 1-based QR version number into the fast_qr enum.
 pub fn version_from_u8(v: u8) -> Result<Version, PigeonError> {
-    if v < 1 || v > 40 {
+    if !(1..=40).contains(&v) {
         return Err(PigeonError::InvalidConfig(format!(
             "QR version must be 1..=40, got {v}"
         )));

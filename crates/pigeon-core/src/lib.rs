@@ -5,6 +5,7 @@
 //! reconstruction and integrity verification. Contains no browser or OS-specific
 //! code; the `pigeon-wasm` crate exposes this engine to JavaScript.
 
+pub mod crypto;
 pub mod decoder;
 pub mod encoder;
 pub mod error;
@@ -16,5 +17,7 @@ pub use encoder::{CompressionMode, EncodeConfig, QrEcl};
 pub use error::PigeonError;
 pub use protocol::metadata::sanitize_filename;
 
-/// Wire protocol version implemented by this engine.
+/// Highest wire protocol version this engine speaks (v2 = encrypted
+/// transfers). Unencrypted transfers still emit byte-compatible v1 packets
+/// so older receivers can reconstruct them; see `docs/PROTOCOL.md`.
 pub const PROTOCOL_VERSION: u8 = protocol::VERSION;

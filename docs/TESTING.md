@@ -32,7 +32,7 @@ two independent environments:
 
 ## Scenarios covered
 
-- Empty file (metadata-only transfer, both environments).
+- Empty file (metadata-only transfer in v1; one sealed-object symbol in v2).
 - 1-byte file.
 - Binary data containing every byte value 0–255 (catches text/UTF-8
   assumptions in QR payloads).
@@ -49,10 +49,22 @@ two independent environments:
   transfer.
 - Concurrent transfers: interleaved ingestion, no cross-contamination.
 - Resource limits: oversized GIFs, excessive transfers, decompression bombs.
-- Version compatibility: unknown version byte rejected explicitly.
+- Version compatibility: unknown version byte rejected explicitly; v1
+  packets claiming encryption and v2 packets without the flag are rejected.
+- **Encryption (protocol v2)**: full passphrase roundtrip (including
+  passphrases entered before the first frame arrives); wrong-passphrase
+  rejection with retry preserved; tampered ciphertext counted, never fatal;
+  spliced packets cannot benefit the spoofed or the real transfer (AAD
+  binding); KDF parameter caps (hostile 4 GiB envelope rejected before
+  allocation); unknown cipher/KDF ids rejected; encrypted empty files;
+  multi-transfer isolation with per-transfer salts; **encrypted optical
+  roundtrip** through the real QR/GIF pipeline with the filename verified
+  hidden pre-decryption; estimator exactness against a real encode.
 - Browser: wasm engine initializes, no page errors on load, non-GIF files
   rejected with a visible message, valid-but-foreign GIFs reported honestly,
-  camera tab opens (Playwright fake media stream).
+  camera tab opens (Playwright fake media stream), **encrypted transfer
+  roundtrips in the real UI with wrong-passphrase rejection then byte-exact
+  recovery**.
 
 ## Reproducing the loss-simulation scenarios
 
@@ -63,8 +75,14 @@ cargo test -p pigeon-core --test roundtrip optical_roundtrip_with_frame_loss -- 
 # native: insufficient frames → honest incomplete state
 cargo test -p pigeon-core --test roundtrip incomplete_transfer_reports_honestly
 
+# native: encrypted transfer through the full optical pipeline
+cargo test -p pigeon-core --test roundtrip encrypted_optical_roundtrip_with_passphrase
+
 # browser: full roundtrip offline (service worker precache required)
 npm run test:e2e -- -g offline
+
+# browser: encrypted roundtrip incl. wrong-passphrase rejection
+npm run test:e2e -- -g encrypted
 
 # browser: incomplete GIF resolves with an honest partial report
 npm run test:e2e -- -g "incomplete Pigeon GIF"

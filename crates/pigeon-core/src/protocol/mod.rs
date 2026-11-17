@@ -12,6 +12,13 @@
 //! 16      4     CRC32C over bytes [2..16] plus the payload
 //! 20      N     payload (N == payload length)
 //! ```
+//!
+//! Versions: unencrypted transfers use **v1** (byte-compatible with the
+//! original protocol so older receivers still reconstruct them). Encrypted
+//! transfers use **v2**, where every payload is an authenticated-encryption
+//! envelope (`crate::crypto`) and flag bit 3 is set. Receivers must treat
+//! the two versions as separate dialects: v1 never carries the encryption
+//! flag; v2 always does.
 
 pub mod header;
 pub mod metadata;
@@ -21,8 +28,12 @@ use crate::error::PigeonError;
 /// Magic bytes every packet starts with: ASCII "PG".
 pub const MAGIC: [u8; 2] = [0x50, 0x47];
 
-/// Current wire protocol version.
-pub const VERSION: u8 = 1;
+/// Unencrypted wire protocol (original dialect).
+pub const VERSION_V1: u8 = 1;
+/// Encrypted wire protocol (envelope payloads, FLAG_ENCRYPTED always set).
+pub const VERSION_V2: u8 = 2;
+/// Highest version this engine speaks (also what the WASM API reports).
+pub const VERSION: u8 = VERSION_V2;
 
 /// Fixed header length in bytes.
 pub const HEADER_LEN: usize = 20;
@@ -33,8 +44,10 @@ pub const FLAG_METADATA: u8 = 0b0000_0001;
 pub const FEC_RAPTORQ: u8 = 0;
 pub const FEC_SCHEME_MASK: u8 = 0b0000_0110;
 pub const FEC_SCHEME_SHIFT: u8 = 1;
-/// Bits 3-7 must be zero in protocol v1 so future revisions can use them.
-pub const FLAG_RESERVED_MASK: u8 = 0b1111_1000;
+/// Flags bit 3: the payload is an authenticated-encryption envelope (v2 only).
+pub const FLAG_ENCRYPTED: u8 = 0b0000_1000;
+/// Bits 4-7 are reserved and must be zero in v1 and v2.
+pub const FLAG_RESERVED_MASK: u8 = 0b1111_0000;
 
 // ---- resource limits enforced on untrusted input ----
 
@@ -87,10 +100,7 @@ pub mod ser {
         serializer.serialize_str(&format!("{id:016x}"))
     }
 
-    pub fn opt_u64_hex<S: Serializer>(
-        id: &Option<u64>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub fn opt_u64_hex<S: Serializer>(id: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error> {
         match id {
             Some(v) => u64_hex(v, serializer),
             None => serializer.serialize_none(),
@@ -110,8 +120,7 @@ pub mod ser {
 /// Generates a fresh random 64-bit transfer identifier.
 pub fn new_transfer_id() -> u64 {
     let mut buf = [0u8; 8];
-    getrandom::getrandom(&mut buf)
-        .unwrap_or_else(|e| panic!("CSPRNG unavailable: {e}"));
+    getrandom::getrandom(&mut buf).unwrap_or_else(|e| panic!("CSPRNG unavailable: {e}"));
     u64::from_le_bytes(buf)
 }
 
@@ -124,7 +133,8 @@ mod tests {
         assert!(validate_flags(0).is_ok());
         assert!(validate_flags(FLAG_METADATA).is_ok());
         assert!(validate_flags(FLAG_METADATA | (FEC_RAPTORQ << FEC_SCHEME_SHIFT)).is_ok());
-        assert!(validate_flags(0b0000_1000).is_err());
+        assert!(validate_flags(FLAG_ENCRYPTED).is_ok());
+        assert!(validate_flags(0b0001_0000).is_err());
         assert!(validate_flags(0b1000_0000).is_err());
     }
 
