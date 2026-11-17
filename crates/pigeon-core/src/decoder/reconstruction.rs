@@ -81,11 +81,7 @@ fn finalize_inner(
             compressed
         }
         Compression::Zlib => {
-            
-            super::super::encoder::fragment::decompress_bounded(
-                &compressed,
-                meta.original_size,
-            )?
+            super::super::encoder::fragment::decompress_bounded(&compressed, meta.original_size)?
         }
     };
 

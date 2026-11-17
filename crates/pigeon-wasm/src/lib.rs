@@ -310,8 +310,7 @@ impl Receiver {
     pub fn new(max_transfer_bytes: Option<JsValue>) -> Self {
         // JS callers pass a Number; values above 2^53 are out of scope for
         // the soft limit and the engine cap applies anyway.
-        let max_bytes: Option<u64> = max_transfer_bytes
-            .and_then(|v| v.as_f64().map(|f| f as u64));
+        let max_bytes: Option<u64> = max_transfer_bytes.and_then(|v| v.as_f64().map(|f| f as u64));
         let limits = DecodeLimits {
             max_transfer_bytes: max_bytes
                 .unwrap_or(pigeon_core::protocol::MAX_DECODE_TRANSFER_BYTES),
